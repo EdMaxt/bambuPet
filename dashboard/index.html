@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bambuPet — Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================
+           bambuPet DARK THEME
+           ============================================ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 30px;
+            font-size: 16px;
+            line-height: 1.8;
+            letter-spacing: 0.05em;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        /* ============================================
+           HEADER
+           ============================================ */
+        .header {
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #2a2a2a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #ffffff;
+            font-size: 1.8em;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+        
+        .header p {
+            color: #888;
+            font-size: 0.95em;
+            font-weight: 300;
+            margin-top: 4px;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        /* ============================================
+           BUTTONS
+           ============================================ */
+        button, .btn {
+            padding: 10px 20px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            font-size: 0.95em;
+            cursor: pointer;
+            font-weight: 400;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        
+        button:hover, .btn:hover {
+            background: #333;
+            border-color: #4a4a4a;
+        }
+        
+        button.secondary {
+            background: transparent;
+            border: 1px solid #333;
+        }
+        
+        button.secondary:hover {
+            background: #0f0f0f;
+            border-color: #444;
+        }
+        
+        /* ============================================
+           STATS BAR
+           ============================================ */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #2a2a2a;
+            text-align: center;
+        }
+        
+        .stat-card h3 {
+            font-size: 2em;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .stat-card p {
+            color: #888;
+            font-size: 0.9em;
+            font-weight: 300;
+        }
+        
+        .stat-card.done h3 { color: #6bcb77; }
+        .stat-card.progress h3 { color: #00e5ff; }
+        .stat-card.pending h3 { color: #ffd93d; }
+        .stat-card.blocked h3 { color: #ff6b6b; }
+        
+        /* ============================================
+           KANBAN BOARD
+           ============================================ */
+        .kanban {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .kanban-column {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #2a2a2a;
+        }
+        
+        .kanban-column h3 {
+            font-size: 1em;
+            font-weight: 500;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .kanban-column h3 .count {
+            background: #2a2a2a;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            color: #888;
+        }
+        
+        .kanban-column.done h3 { color: #6bcb77; }
+        .kanban-column.progress h3 { color: #00e5ff; }
+        .kanban-column.pending h3 { color: #ffd93d; }
+        .kanban-column.blocked h3 { color: #ff6b6b; }
+        
+        .kanban-items {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .kanban-item {
+            background: #0f0f0f;
+            border-radius: 6px;
+            padding: 12px;
+            border: 1px solid #2a2a2a;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .kanban-item:hover {
+            border-color: #444;
+            background: #131313;
+        }
+        
+        .kanban-item .item-id {
+            font-size: 0.75em;
+            color: #666;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .kanban-item .item-title {
+            color: #e0e0e0;
+            font-weight: 400;
+        }
+        
+        .kanban-item .item-severity {
+            margin-top: 6px;
+            font-size: 0.75em;
+        }
+        
+        .severity-high { color: #ff6b6b; }
+        .severity-medium { color: #ffd93d; }
+        .severity-low { color: #6bcb77; }
+        
+        /* ============================================
+           PRINTER STATUS PANEL
+           ============================================ */
+        .panel {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 25px;
+            border: 1px solid #2a2a2a;
+            margin-bottom: 30px;
+        }
+        
+        .panel h2 {
+            font-size: 1.2em;
+            font-weight: 400;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        
+        .printer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        
+        .printer-card {
+            background: #0f0f0f;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #2a2a2a;
+        }
+        
+        .printer-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .printer-name {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .printer-status {
+            font-size: 0.8em;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+        
+        .status-printing { background: rgba(0, 229, 255, 0.15); color: #00e5ff; }
+        .status-idle { background: rgba(100, 100, 100, 0.3); color: #aaa; }
+        .status-done { background: rgba(107, 203, 119, 0.15); color: #6bcb77; }
+        .status-error { background: rgba(255, 107, 107, 0.15); color: #ff6b6b; }
+        .status-paused { background: rgba(255, 217, 61, 0.15); color: #ffd93d; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00e5ff, #00ff88);
+            border-radius: 4px;
+            transition: width 1s ease;
+        }
+        
+        .printer-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85em;
+            color: #888;
+        }
+        
+        /* ============================================
+           EMPTY STATE
+           ============================================ */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        /* ============================================
+           RESPONSIVE
+           ============================================ */
+        @media (max-width: 1024px) {
+            .kanban { grid-template-columns: repeat(2, 1fr); }
+            .stats-bar { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        @media (max-width: 600px) {
+            .kanban { grid-template-columns: 1fr; }
+            .stats-bar { grid-template-columns: 1fr; }
+            body { padding: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>🐼 bambuPet Dashboard</h1>
+                <p>Panel de control del widget de monitoreo de impresoras BambuLab</p>
+            </div>
+            <div class="header-actions">
+                <button class="secondary" onclick="refreshData()">🔄 Actualizar</button>
+                <button onclick="openWidget()">🖥️ Abrir Widget</button>
+            </div>
+        </div>
+        
+        <!-- Stats -->
+        <div class="stats-bar">
+            <div class="stat-card done">
+                <h3 id="statDone">13</h3>
+                <p>Hecho</p>
+            </div>
+            <div class="stat-card progress">
+                <h3 id="statProgress">0</h3>
+                <p>En Progreso</p>
+            </div>
+            <div class="stat-card pending">
+                <h3 id="statPending">10</h3>
+                <p>Pendiente</p>
+            </div>
+            <div class="stat-card blocked">
+                <h3 id="statBlocked">0</h3>
+                <p>Bloqueado</p>
+            </div>
+        </div>
+        
+        <!-- Printer Status -->
+        <div class="panel">
+            <h2>🖨️ Estado de Impresoras</h2>
+            <div class="printer-grid" id="printerGrid">
+                <!-- Se llena dinámicamente -->
+            </div>
+        </div>
+        
+        <!-- Kanban Board -->
+        <div class="kanban">
+            <!-- Done -->
+            <div class="kanban-column done">
+                <h3>✅ Hecho <span class="count">13</span></h3>
+                <div class="kanban-items" id="kanbanDone"></div>
+            </div>
+            
+            <!-- In Progress -->
+            <div class="kanban-column progress">
+                <h3>🔄 En Progreso <span class="count">0</span></h3>
+                <div class="kanban-items" id="kanbanProgress"></div>
+            </div>
+            
+            <!-- Pending -->
+            <div class="kanban-column pending">
+                <h3>📋 Pendiente <span class="count">10</span></h3>
+                <div class="kanban-items" id="kanbanPending"></div>
+            </div>
+            
+            <!-- Blocked -->
+            <div class="kanban-column blocked">
+                <h3>🚧 Bloqueado <span class="count">0</span></h3>
+                <div class="kanban-items" id="kanbanBlocked"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // DATA DEL PROYECTO
+        // ============================================
+        
+        const projectData = {
+            done: [
+                { id: 'BC-001', title: 'pywebview sin transparencia → PyQt5', severity: 'high' },
+                { id: 'BC-002', title: 'SSL autofirmado → ssl.CERT_NONE', severity: 'high' },
+                { id: 'BC-003', title: 'Panda deformado → Logo BambuLab SVG', severity: 'medium' },
+                { id: 'BC-004', title: 'Drag arreglado con detección de movimiento', severity: 'high' },
+                { id: 'BC-005', title: 'Click expande panel (webview transparente)', severity: 'high' },
+                { id: 'BC-006', title: 'State tracker para N/A entre mensajes', severity: 'medium' },
+                { id: 'FI-001', title: 'Ventana transparente (PyQt5)', severity: 'high' },
+                { id: 'FI-002', title: 'MQTT directo multi-impresora', severity: 'high' },
+                { id: 'FI-003', title: 'Anillo de progreso SVG', severity: 'medium' },
+                { id: 'FI-004', title: 'Celebración al completar (bounce + confetti)', severity: 'low' },
+                { id: 'FI-005', title: 'Indicador MQTT verde/rojo', severity: 'medium' },
+                { id: 'FI-006', title: 'Panel expandido multi-impresora', severity: 'medium' },
+                { id: 'FI-007', title: 'Widget 30% más grande (156px)', severity: 'low' },
+            ],
+            progress: [],
+            pending: [
+                { id: 'PE-001', title: 'Slider de tamaño dinámico (50% → 200%)', severity: 'high' },
+                { id: 'PE-002', title: 'Slider de opacidad (20% → 100%)', severity: 'high' },
+                { id: 'PE-003', title: 'Panel de configuración inline', severity: 'high' },
+                { id: 'PE-004', title: 'Múltiples skins (panda, planta, gato, robot)', severity: 'medium' },
+                { id: 'PE-005', title: 'Notificaciones nativas al completar', severity: 'low' },
+                { id: 'PE-006', title: 'System tray icon', severity: 'low' },
+                { id: 'PE-007', title: 'Sonidos opcionales', severity: 'low' },
+                { id: 'PE-008', title: 'Auto-start con Windows', severity: 'low' },
+                { id: 'PE-009', title: 'Historial de impresiones', severity: 'low' },
+                { id: 'PE-010', title: 'Overlay de cámara', severity: 'low' },
+            ],
+            blocked: []
+        };
+        
+        const printers = [
+            {
+                name: 'Rocky',
+                status: 'printing',
+                progress: 72,
+                timeRemaining: 120,
+                currentFile: 'benchy_v3.3mf',
+                nozzleTemp: 220,
+                bedTemp: 65
+            }
+        ];
+        
+        // ============================================
+        // RENDER FUNCTIONS
+        // ============================================
+        
+        function renderKanban() {
+            const columns = ['done', 'progress', 'pending', 'blocked'];
+            
+            columns.forEach(col => {
+                const container = document.getElementById('kanban' + col.charAt(0).toUpperCase() + col.slice(1));
+                const items = projectData[col];
+                
+                if (items.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">${col === 'done' ? '🎉' : col === 'progress' ? '💤' : '📭'}</div>
+                            <p>${col === 'done' ? '¡Todo completo!' : col === 'progress' ? 'Sin tareas activas' : 'Sin tareas'}</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                container.innerHTML = items.map(item => `
+                    <div class="kanban-item">
+                        <div class="item-id">${item.id}</div>
+                        <div class="item-title">${item.title}</div>
+                        <div class="item-severity severity-${item.severity}">
+                            ${item.severity === 'high' ? '🔴 Alta' : item.severity === 'medium' ? '🟡 Media' : '🟢 Baja'}
+                        </div>
+                    </div>
+                `).join('');
+            });
+            
+            // Update stats
+            document.getElementById('statDone').textContent = projectData.done.length;
+            document.getElementById('statProgress').textContent = projectData.progress.length;
+            document.getElementById('statPending').textContent = projectData.pending.length;
+            document.getElementById('statBlocked').textContent = projectData.blocked.length;
+        }
+        
+        function renderPrinters() {
+            const grid = document.getElementById('printerGrid');
+            
+            if (printers.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🖨️</div>
+                        <p>No hay impresoras configuradas</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            grid.innerHTML = printers.map(p => {
+                const statusLabels = {
+                    printing: 'Imprimiendo',
+                    idle: 'Inactiva',
+                    done: 'Completado',
+                    error: 'Error',
+                    paused: 'Pausada'
+                };
+                
+                const timeStr = formatTime(p.timeRemaining);
+                
+                return `
+                    <div class="printer-card">
+                        <div class="printer-card-header">
+                            <div class="printer-name">🖨️ ${p.name}</div>
+                            <div class="printer-status status-${p.status}">${statusLabels[p.status]}</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" style="width: ${p.progress}%"></div>
+                        </div>
+                        <div class="printer-meta">
+                            <span>${p.progress}%</span>
+                            <span>${timeStr}</span>
+                        </div>
+                        ${p.currentFile ? `<div style="margin-top:8px;font-size:0.8em;color:#666;">📄 ${p.currentFile}</div>` : ''}
+                        <div style="margin-top:6px;font-size:0.75em;color:#555;">
+                            🌡️ Nozzle: ${p.nozzleTemp}°C | Bed: ${p.bedTemp}°C
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function formatTime(minutes) {
+            if (!minutes || minutes <= 0) return '--:--';
+            const h = Math.floor(minutes / 60);
+            const m = minutes % 60;
+            return h > 0 ? `${h}h ${m}m restantes` : `${m}m restantes`;
+        }
+        
+        function refreshData() {
+            // Simulated refresh
+            const btn = document.querySelector('button');
+            btn.textContent = '⏳ Cargando...';
+            setTimeout(() => {
+                renderKanban();
+                renderPrinters();
+                btn.textContent = '🔄 Actualizar';
+            }, 500);
+        }
+        
+        function openWidget() {
+            // Intentar abrir el widget
+            try {
+                window.location.href = 'http://localhost:8080';
+            } catch (e) {
+                alert('El widget debe abrirse manualmente desde run.bat');
+            }
+        }
+        
+        // ============================================
+        // INIT
+        // ============================================
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            renderKanban();
+            renderPrinters();
+        });
+    </script>
+</body>
+</html>

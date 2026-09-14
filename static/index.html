@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bambuPet</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background: transparent !important;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #e0e0e0;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        /* === PET CONTAINER === */
+        .pet-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        
+        /* === BAMBU LOGO PET === */
+        .pet {
+            width: 100px;
+            height: 100px;
+            position: relative;
+            transition: transform 0.3s ease;
+        }
+        
+        .pet svg {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* === PROGRESS RING === */
+        .progress-ring {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 116px;
+            height: 116px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .progress-ring.active { opacity: 1; }
+        
+        .progress-ring svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+        
+        .progress-ring circle {
+            fill: none;
+            stroke-width: 5;
+            stroke-linecap: round;
+        }
+        
+        .progress-bg { stroke: rgba(255,255,255,0.2); }
+        
+        .progress-fill {
+            stroke: #00e5ff;
+            transition: stroke-dashoffset 1s ease, stroke 0.5s ease;
+        }
+        
+        /* === PROGRESS TEXT === */
+        .progress-text {
+            position: absolute;
+            bottom: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 3px 10px;
+            border-radius: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .progress-text.visible { opacity: 1; }
+        
+        /* === ANIMATIONS === */
+        
+        @keyframes breathing {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .pet-idle { animation: breathing 3s ease-in-out infinite; }
+        
+        @keyframes pulse-glow {
+            0%, 100% { filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.4)); }
+            50% { filter: drop-shadow(0 0 18px rgba(0, 229, 255, 0.9)); }
+        }
+        
+        .pet-printing { animation: pulse-glow 2s ease-in-out infinite; }
+        
+        @keyframes celebrate-bounce {
+            0%   { transform: scale(1) rotate(0deg); }
+            20%  { transform: scale(1.3) rotate(-8deg); }
+            40%  { transform: scale(1.4) rotate(8deg); }
+            60%  { transform: scale(1.3) rotate(-5deg); }
+            80%  { transform: scale(1.2) rotate(3deg); }
+            100% { transform: scale(1) rotate(0deg); }
+        }
+        
+        .pet.celebrating { animation: celebrate-bounce 0.6s ease-in-out 3; }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        
+        .pet-error {
+            animation: shake 0.3s ease-in-out 3;
+            filter: drop-shadow(0 0 10px rgba(255, 50, 50, 0.7));
+        }
+        
+        /* === CONFETTI === */
+        .confetti-container {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 60px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        
+        .confetti-container.active { opacity: 1; }
+        
+        .confetti {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            animation: confetti-fall 1.5s ease-out forwards;
+        }
+        
+        @keyframes confetti-fall {
+            0%   { opacity: 1; transform: translateY(0) rotate(0deg); }
+            100% { opacity: 0; transform: translateY(60px) rotate(720deg); }
+        }
+        
+        .confetti:nth-child(1) { background: #ff6b6b; left: 10%; animation-delay: 0s; }
+        .confetti:nth-child(2) { background: #ffd93d; left: 25%; animation-delay: 0.1s; }
+        .confetti:nth-child(3) { background: #6bcb77; left: 40%; animation-delay: 0.2s; }
+        .confetti:nth-child(4) { background: #4d96ff; left: 55%; animation-delay: 0.05s; }
+        .confetti:nth-child(5) { background: #ff6b6b; left: 70%; animation-delay: 0.15s; }
+        .confetti:nth-child(6) { background: #ffd93d; left: 85%; animation-delay: 0.25s; }
+        .confetti:nth-child(7) { background: #6bcb77; left: 15%; animation-delay: 0.3s; }
+        .confetti:nth-child(8) { background: #4d96ff; left: 45%; animation-delay: 0.12s; }
+        .confetti:nth-child(9) { background: #ff6b6b; left: 75%; animation-delay: 0.18s; }
+        .confetti:nth-child(10) { background: #ffd93d; left: 30%; animation-delay: 0.22s; }
+        
+        /* === EXPANDED PANEL === */
+        .expanded-panel {
+            display: none;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 15, 25, 0.95);
+            border-radius: 20px;
+            padding: 20px;
+            flex-direction: column;
+            gap: 12px;
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            cursor: default;
+        }
+        
+        .expanded-panel.visible { display: flex; }
+        
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 10px;
+        }
+        
+        .panel-title {
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .panel-close {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        
+        .panel-close:hover {
+            background: rgba(255,255,255,0.2);
+            color: #fff;
+        }
+        
+        /* === PRINTER CARD === */
+        .printer-card {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        
+        .printer-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .printer-name {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .printer-status {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        
+        .status-printing { background: rgba(0, 229, 255, 0.2); color: #00e5ff; }
+        .status-idle { background: rgba(100, 100, 100, 0.3); color: #aaa; }
+        .status-done { background: rgba(107, 203, 119, 0.2); color: #6bcb77; }
+        .status-error { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+        .status-paused { background: rgba(255, 217, 61, 0.2); color: #ffd93d; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00e5ff, #00ff88);
+            border-radius: 4px;
+            transition: width 1s ease;
+        }
+        
+        .printer-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #888;
+        }
+        
+        /* === MQTT STATUS === */
+        .mqtt-status {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #666;
+            border: 3px solid rgba(0,0,0,0.4);
+            transition: background 0.3s ease;
+            z-index: 10;
+        }
+        
+        .mqtt-status.connected {
+            background: #6bcb77;
+            box-shadow: 0 0 10px rgba(107, 203, 119, 0.8);
+        }
+        
+        .mqtt-status.disconnected { background: #ff6b6b; }
+        .mqtt-status.connecting {
+            background: #ffd93d;
+            animation: mqtt-pulse 1s ease-in-out infinite;
+        }
+        
+        @keyframes mqtt-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* === PRINTER NAME === */
+        .printer-name-compact {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: rgba(255,255,255,0.9);
+            background: rgba(0,0,0,0.7);
+            padding: 3px 10px;
+            border-radius: 8px;
+            white-space: nowrap;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+        
+        .printer-name-compact.visible { opacity: 1; }
+        
+        /* === NO PRINTERS === */
+        .no-printers {
+            text-align: center;
+            color: #888;
+            font-size: 13px;
+            padding: 20px;
+        }
+        
+        .no-printers-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Vista compacta -->
+    <div class="compact-view" id="compactView">
+        <div class="pet-container">
+            <!-- MQTT indicator -->
+            <div class="mqtt-status disconnected" id="mqttStatus"></div>
+            
+            <!-- Printer name -->
+            <div class="printer-name-compact" id="printerNameCompact"></div>
+            
+            <!-- Progress ring -->
+            <div class="progress-ring" id="progressRing">
+                <svg viewBox="0 0 100 100">
+                    <circle class="progress-bg" cx="50" cy="50" r="42"/>
+                    <circle class="progress-fill" id="progressCircle" cx="50" cy="50" r="42"
+                        stroke-dasharray="263.89" stroke-dashoffset="263.89"/>
+                </svg>
+            </div>
+            
+            <!-- Confetti -->
+            <div class="confetti-container" id="confetti">
+                <div class="confetti"></div><div class="confetti"></div><div class="confetti"></div>
+                <div class="confetti"></div><div class="confetti"></div><div class="confetti"></div>
+                <div class="confetti"></div><div class="confetti"></div><div class="confetti"></div>
+                <div class="confetti"></div>
+            </div>
+            
+            <!-- BambuLab Logo Pet -->
+            <div class="pet pet-idle" id="panda">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Background circle with gradient -->
+                    <defs>
+                        <linearGradient id="bambuGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#00c9a7"/>
+                            <stop offset="100%" style="stop-color:#0077b6"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="50" cy="50" r="46" fill="url(#bambuGrad)"/>
+                    
+                    <!-- Bamboo nodes -->
+                    <rect x="30" y="20" width="40" height="4" rx="2" fill="rgba(255,255,255,0.3)"/>
+                    <rect x="30" y="40" width="40" height="4" rx="2" fill="rgba(255,255,255,0.3)"/>
+                    <rect x="30" y="60" width="40" height="4" rx="2" fill="rgba(255,255,255,0.3)"/>
+                    <rect x="30" y="76" width="40" height="4" rx="2" fill="rgba(255,255,255,0.3)"/>
+                    
+                    <!-- B letter -->
+                    <text x="50" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="bold" fill="#ffffff">B</text>
+                    
+                    <!-- Highlight -->
+                    <ellipse cx="35" cy="30" rx="12" ry="8" fill="rgba(255,255,255,0.2)"/>
+                </svg>
+            </div>
+            
+            <!-- Progress text -->
+            <div class="progress-text" id="progressText">0%</div>
+        </div>
+    </div>
+    
+    <!-- Vista expandida -->
+    <div class="expanded-panel" id="expandedPanel">
+        <div class="panel-header">
+            <div class="panel-title">🐼 bambuPet <span id="mqttBadge" style="font-size:11px;color:#888;font-weight:normal;"></span></div>
+            <button class="panel-close" id="btnClose" title="Minimizar">✕</button>
+        </div>
+        <div id="printersList"></div>
+    </div>
+
+    <script>
+        window.bambuPet = {
+            state: { authenticated: false, printers: [] },
+            elements: {},
+            
+            init() {
+                this.elements = {
+                    panda: document.getElementById('panda'),
+                    progressRing: document.getElementById('progressRing'),
+                    progressCircle: document.getElementById('progressCircle'),
+                    progressText: document.getElementById('progressText'),
+                    confetti: document.getElementById('confetti'),
+                    compactView: document.getElementById('compactView'),
+                    expandedPanel: document.getElementById('expandedPanel'),
+                    printersList: document.getElementById('printersList'),
+                    btnClose: document.getElementById('btnClose'),
+                    mqttStatus: document.getElementById('mqttStatus'),
+                    printerNameCompact: document.getElementById('printerNameCompact')
+                };
+                
+                this.elements.btnClose.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.collapse();
+                });
+                
+                console.log('🐼 bambuPet frontend listo');
+            },
+            
+            updateState(data) {
+                this.state = data;
+                this.render();
+            },
+            
+            render() {
+                const printers = this.state.printers || [];
+                const mqttStatus = this.state.mqtt_status || {};
+                
+                this.updateMqttIndicator(mqttStatus);
+                this.updateMqttBadge(mqttStatus);
+                
+                if (printers.length === 0) {
+                    this.renderNoPrinters();
+                    return;
+                }
+                
+                const activePrinter = this.getActivePrinter(printers);
+                
+                if (activePrinter) {
+                    this.updatePetState(activePrinter);
+                    if (this.elements.printerNameCompact) {
+                        this.elements.printerNameCompact.textContent = activePrinter.name || 'Printer';
+                        this.elements.printerNameCompact.classList.add('visible');
+                    }
+                }
+                
+                this.renderPrintersList(printers);
+            },
+            
+            updateMqttIndicator(mqttStatus) {
+                const el = this.elements.mqttStatus;
+                if (!el) return;
+                el.className = 'mqtt-status';
+                
+                if (mqttStatus.connected > 0) {
+                    el.classList.add('connected');
+                    el.title = `${mqttStatus.connected}/${mqttStatus.total} conectadas`;
+                } else if (mqttStatus.total > 0) {
+                    el.classList.add('disconnected');
+                    el.title = 'Sin conexión';
+                } else {
+                    el.classList.add('connecting');
+                    el.title = 'Buscando...';
+                }
+            },
+            
+            updateMqttBadge(mqttStatus) {
+                const el = document.getElementById('mqttBadge');
+                if (!el) return;
+                if (mqttStatus.connected > 0) {
+                    el.textContent = `(${mqttStatus.connected}/${mqttStatus.total} conectadas)`;
+                } else if (mqttStatus.total > 0) {
+                    el.textContent = '(sin conexión)';
+                } else {
+                    el.textContent = '';
+                }
+            },
+            
+            getActivePrinter(printers) {
+                const printing = printers.filter(p => p.status === 'printing');
+                if (printing.length > 0) {
+                    return printing.reduce((a, b) => (a.progress || 0) > (b.progress || 0) ? a : b);
+                }
+                const paused = printers.filter(p => p.status === 'paused');
+                if (paused.length > 0) return paused[0];
+                const done = printers.filter(p => p.status === 'done');
+                if (done.length > 0) return done[0];
+                return printers[0];
+            },
+            
+            updatePetState(printer) {
+                const { panda, progressRing, progressCircle, progressText } = this.elements;
+                const progress = printer.progress || 0;
+                const status = printer.status || 'idle';
+                
+                panda.className = 'pet';
+                const circumference = 263.89;
+                const offset = circumference - (progress / 100) * circumference;
+                
+                switch (status) {
+                    case 'printing':
+                        panda.classList.add('pet-printing');
+                        progressRing.classList.add('active');
+                        progressText.classList.add('visible');
+                        progressText.textContent = `${Math.round(progress)}%`;
+                        progressCircle.style.strokeDashoffset = offset;
+                        if (progress > 80) progressCircle.style.stroke = '#6bcb77';
+                        else if (progress > 50) progressCircle.style.stroke = '#00ff88';
+                        else progressCircle.style.stroke = '#00e5ff';
+                        break;
+                    case 'done':
+                        panda.classList.add('pet-idle');
+                        progressRing.classList.remove('active');
+                        progressText.classList.add('visible');
+                        progressText.textContent = '✓ Listo';
+                        this.celebrate();
+                        break;
+                    case 'error':
+                        panda.classList.add('pet-error');
+                        progressRing.classList.remove('active');
+                        progressText.classList.remove('visible');
+                        break;
+                    case 'paused':
+                        panda.classList.add('pet-idle');
+                        progressRing.classList.add('active');
+                        progressText.classList.add('visible');
+                        progressText.textContent = `⏸ ${Math.round(progress)}%`;
+                        progressCircle.style.stroke = '#ffd93d';
+                        progressCircle.style.strokeDashoffset = offset;
+                        break;
+                    default:
+                        panda.classList.add('pet-idle');
+                        progressRing.classList.remove('active');
+                        progressText.classList.remove('visible');
+                }
+            },
+            
+            celebrate() {
+                const { panda, confetti } = this.elements;
+                panda.classList.add('celebrating');
+                confetti.classList.add('active');
+                setTimeout(() => {
+                    panda.classList.remove('celebrating');
+                    confetti.classList.remove('active');
+                }, 3000);
+            },
+            
+            renderPrintersList(printers) {
+                const container = this.elements.printersList;
+                if (printers.length === 0) {
+                    container.innerHTML = `<div class="no-printers"><div class="no-printers-icon">📭</div><div>Sin impresoras</div></div>`;
+                    return;
+                }
+                
+                container.innerHTML = printers.map(p => {
+                    const progress = p.progress || 0;
+                    const statusClass = this.getStatusClass(p.status);
+                    const statusLabel = this.getStatusLabel(p.status);
+                    const timeStr = this.formatTime(p.time_remaining);
+                    const fileStr = p.current_file ? `<div style="font-size:10px;color:#666;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📄 ${p.current_file}</div>` : '';
+                    return `
+                        <div class="printer-card">
+                            <div class="printer-card-header">
+                                <div class="printer-name">🖨️ ${p.name}</div>
+                                <div class="printer-status ${statusClass}">${statusLabel}</div>
+                            </div>
+                            <div class="progress-bar"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>
+                            <div class="printer-meta"><span>${Math.round(progress)}%</span><span>${timeStr}</span></div>
+                            ${fileStr}
+                        </div>
+                    `;
+                }).join('');
+            },
+            
+            renderNoPrinters() {
+                const { panda, progressRing, progressText } = this.elements;
+                panda.className = 'pet pet-idle';
+                progressRing.classList.remove('active');
+                progressText.classList.remove('visible');
+                if (this.elements.printerNameCompact) {
+                    this.elements.printerNameCompact.classList.remove('visible');
+                }
+                this.elements.printersList.innerHTML = `
+                    <div class="no-printers">
+                        <div class="no-printers-icon">🔍</div>
+                        <div>Buscando impresoras...</div>
+                        <div style="font-size:10px;margin-top:4px;">Verifica config.json</div>
+                    </div>
+                `;
+            },
+            
+            getStatusClass(status) {
+                const map = { 'printing': 'status-printing', 'idle': 'status-idle', 'done': 'status-done', 'error': 'status-error', 'paused': 'status-paused' };
+                return map[status] || 'status-idle';
+            },
+            
+            getStatusLabel(status) {
+                const map = { 'printing': 'Imprimiendo', 'idle': 'Inactiva', 'done': 'Completado', 'error': 'Error', 'paused': 'Pausada' };
+                return map[status] || status;
+            },
+            
+            formatTime(minutes) {
+                if (!minutes || minutes <= 0) return '--:--';
+                const h = Math.floor(minutes / 60);
+                const m = minutes % 60;
+                return h > 0 ? `${h}h ${m}m` : `${m}m`;
+            },
+            
+            expand() {
+                this.elements.compactView.style.display = 'none';
+                this.elements.expandedPanel.classList.add('visible');
+            },
+            
+            collapse() {
+                this.elements.compactView.style.display = 'flex';
+                this.elements.expandedPanel.classList.remove('visible');
+            }
+        };
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => window.bambuPet.init());
+        } else {
+            window.bambuPet.init();
+        }
+    </script>
+</body>
+</html>

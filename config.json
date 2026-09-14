@@ -1,0 +1,26 @@
+{
+  "mqtt": {
+    "poll_interval_sec": 10,
+    "reconnect_delay_sec": 5,
+    "printers": [
+      {
+        "name": "Rocky",
+        "ip": "192.168.100.15",
+        "serial": "0309CA510501451",
+        "access_code": "014a1cf8"
+      }
+    ]
+  },
+  "display": {
+    "position": "bottom-right",
+    "offset_x": 20,
+    "offset_y": 20,
+    "scale": 1.0,
+    "always_on_top": true
+  },
+  "pet": {
+    "celebration_duration_sec": 5,
+    "show_printer_name": true,
+    "compact_mode": "most_progress"
+  }
+}
