@@ -523,12 +523,7 @@
                     this.elements.valSize.textContent = val + '%';
                     this.applySize(val);
                     localStorage.setItem('bambuPet_size', val);
-                    // Notificar a Python
-                    if (window.pywebview) {
-                        window.pywebview.api.set_scale(parseInt(val));
-                    } else if (window.bambuPetAPI) {
-                        window.bambuPetAPI.receive_message('scale', val);
-                    }
+                    window.bambuPetAPI.receive_message('scale', val);
                 });
                 
                 this.elements.sliderOpacity.addEventListener('input', (e) => {
@@ -536,12 +531,7 @@
                     this.elements.valOpacity.textContent = val + '%';
                     this.applyOpacity(val);
                     localStorage.setItem('bambuPet_opacity', val);
-                    // Notificar a Python
-                    if (window.pywebview) {
-                        window.pywebview.api.set_opacity(parseInt(val));
-                    } else if (window.bambuPetAPI) {
-                        window.bambuPetAPI.receive_message('opacity', val);
-                    }
+                    window.bambuPetAPI.receive_message('opacity', val);
                 });
             },
             
@@ -690,31 +680,77 @@
                 }, 3000);
             },
             
+            // FIX: Escapar HTML para prevenir XSS
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            },
+            
             renderPrintersList(printers) {
                 const container = this.elements.printersList;
+                container.innerHTML = ''; // Limpiar
+                
                 if (printers.length === 0) {
                     container.innerHTML = `<div class="no-printers"><div class="no-printers-icon">📭</div><div>Sin impresoras</div></div>`;
                     return;
                 }
                 
-                container.innerHTML = printers.map(p => {
+                // FIX: Usar createElement en lugar de innerHTML para prevenir XSS
+                printers.forEach(p => {
                     const progress = p.progress || 0;
                     const statusClass = this.getStatusClass(p.status);
                     const statusLabel = this.getStatusLabel(p.status);
                     const timeStr = this.formatTime(p.time_remaining);
-                    const fileStr = p.current_file ? `<div style="font-size:10px;color:#666;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📄 ${p.current_file}</div>` : '';
-                    return `
-                        <div class="printer-card">
-                            <div class="printer-card-header">
-                                <div class="printer-name">🖨️ ${p.name}</div>
-                                <div class="printer-status ${statusClass}">${statusLabel}</div>
-                            </div>
-                            <div class="progress-bar"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>
-                            <div class="printer-meta"><span>${Math.round(progress)}%</span><span>${timeStr}</span></div>
-                            ${fileStr}
-                        </div>
-                    `;
-                }).join('');
+                    const safeName = this.escapeHtml(p.name || 'Printer');
+                    const safeFile = this.escapeHtml(p.current_file || '');
+                    
+                    const card = document.createElement('div');
+                    card.className = 'printer-card';
+                    
+                    const header = document.createElement('div');
+                    header.className = 'printer-card-header';
+                    
+                    const nameEl = document.createElement('div');
+                    nameEl.className = 'printer-name';
+                    nameEl.textContent = `🖨️ ${safeName}`;
+                    
+                    const statusEl = document.createElement('div');
+                    statusEl.className = `printer-status ${statusClass}`;
+                    statusEl.textContent = statusLabel;
+                    
+                    header.appendChild(nameEl);
+                    header.appendChild(statusEl);
+                    
+                    const progressBar = document.createElement('div');
+                    progressBar.className = 'progress-bar';
+                    const progressFill = document.createElement('div');
+                    progressFill.className = 'progress-bar-fill';
+                    progressFill.style.width = `${progress}%`;
+                    progressBar.appendChild(progressFill);
+                    
+                    const meta = document.createElement('div');
+                    meta.className = 'printer-meta';
+                    const percentSpan = document.createElement('span');
+                    percentSpan.textContent = `${Math.round(progress)}%`;
+                    const timeSpan = document.createElement('span');
+                    timeSpan.textContent = timeStr;
+                    meta.appendChild(percentSpan);
+                    meta.appendChild(timeSpan);
+                    
+                    card.appendChild(header);
+                    card.appendChild(progressBar);
+                    card.appendChild(meta);
+                    
+                    if (safeFile) {
+                        const fileEl = document.createElement('div');
+                        fileEl.style.cssText = 'font-size:10px;color:#666;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                        fileEl.textContent = `📄 ${safeFile}`;
+                        card.appendChild(fileEl);
+                    }
+                    
+                    container.appendChild(card);
+                });
             },
             
             renderNoPrinters() {

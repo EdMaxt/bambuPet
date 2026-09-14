@@ -1,11 +1,12 @@
 """
 bambuPet — Desktop pet para monitoreo de impresoras BambuLab
-v0.2 Prototipo con MQTT directo
+v0.3.1 — Code review fixes
 """
 
 import sys
 import json
 import os
+import logging
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl, QPoint, QRect, QSize
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
@@ -14,10 +15,42 @@ from PyQt5.QtGui import QColor, QCursor
 from mqtt_manager import MQTTManager
 from parser import parse_printer_status, get_print_summary, PrinterStateTracker
 
-# Cargar configuración
+# Configuración de logging (no usar basicConfig en módulo)
+logger = logging.getLogger(__name__)
+
+# Cargar configuración con manejo de errores
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
-with open(CONFIG_PATH, "r") as f:
-    CONFIG = json.load(f)
+
+def load_config():
+    """Cargar configuración con defaults seguros."""
+    defaults = {
+        "mqtt": {"poll_interval_sec": 10, "reconnect_delay_sec": 5, "printers": []},
+        "display": {"position": "bottom-right", "offset_x": 20, "offset_y": 20, "scale": 1.0, "opacity": 0.95, "always_on_top": True},
+        "pet": {"celebration_duration_sec": 5, "show_printer_name": True, "compact_mode": "most_progress"}
+    }
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            user_config = json.load(f)
+        # Merge con defaults
+        for key, value in defaults.items():
+            if key not in user_config:
+                user_config[key] = value
+            elif isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    if subkey not in user_config[key]:
+                        user_config[key][subkey] = subvalue
+        return user_config
+    except FileNotFoundError:
+        logger.warning(f"config.json no encontrado en {CONFIG_PATH}, usando defaults")
+        return defaults
+    except json.JSONDecodeError as e:
+        logger.error(f"config.json inválido: {e}, usando defaults")
+        return defaults
+    except Exception as e:
+        logger.error(f"Error cargando config: {e}, usando defaults")
+        return defaults
+
+CONFIG = load_config()
 
 
 class PandaPetWindow(QMainWindow):
@@ -34,7 +67,10 @@ class PandaPetWindow(QMainWindow):
         self.expanded = False
         self.dragging = False
         self.drag_offset = QPoint()
+        self.drag_start = QPoint()  # Inicializado en __init__ para evitar hasattr
         self.always_on_top = CONFIG["display"]["always_on_top"]
+        self._scale = 1.0
+        self._opacity = 0.95
         
         self._setup_window()
         self._setup_ui()
@@ -112,13 +148,7 @@ class PandaPetWindow(QMainWindow):
         js_api = """
         window.bambuPetAPI = {
             receive_message: function(action, value) {
-                if (window.qt) {
-                    // QWebChannel disponible
-                    window.bambuPetBackend.receive_message(action, value);
-                } else {
-                    // Fallback: usar console.log y el event filter lo captura
-                    console.log('bambuPet:' + action + ':' + value);
-                }
+                console.log('bambuPet:' + action + ':' + value);
             }
         };
         """
@@ -139,19 +169,31 @@ class PandaPetWindow(QMainWindow):
                 parsed["name"] = config.get("name", "Printer") if config else "Printer"
             
             parsed["serial"] = serial
+            
+            # FIX: No enviar raw_data completo al frontend (innecesario y pesado)
+            parsed.pop("raw", None)
+            
             printers_ui.append(parsed)
         
+        # FIX: Contadores incrementales en lugar de iterar cada vez
+        connected = sum(1 for c in self.mqtt_manager.clients.values() if c.connected) if self.mqtt_manager else 0
+        total = len(self.mqtt_manager.clients) if self.mqtt_manager else 0
+        
         state = {
-            "authenticated": self.mqtt_manager.connected_count > 0 if self.mqtt_manager else False,
+            "authenticated": connected > 0,
             "printers": printers_ui,
             "mqtt_status": {
-                "connected": self.mqtt_manager.connected_count if self.mqtt_manager else 0,
-                "total": self.mqtt_manager.total_count if self.mqtt_manager else 0
+                "connected": connected,
+                "total": total
             }
         }
         
-        js = f"window.bambuPet && window.bambuPet.updateState({json.dumps(state)});"
-        self.webview.page().runJavaScript(js)
+        try:
+            json_state = json.dumps(state, default=str)
+            js = f"window.bambuPet && window.bambuPet.updateState({json_state});"
+            self.webview.page().runJavaScript(js)
+        except Exception as e:
+            logger.error(f"Error inyectando estado: {e}")
     
     def _get_printer_config(self, serial: str) -> dict:
         """Obtener configuración de una impresora por serial."""
@@ -165,13 +207,28 @@ class PandaPetWindow(QMainWindow):
         mqtt_config = CONFIG.get("mqtt", {})
         printers = mqtt_config.get("printers", [])
         
-        if not printers:
-            print("[bambuPet] ⚠️ No hay impresoras configuradas en config.json")
+        # FIX: Validar que printers sea una lista
+        if not isinstance(printers, list) or not printers:
+            logger.warning("No hay impresoras configuradas en config.json")
+            return
+        
+        # FIX: Validar cada impresora
+        required_keys = {"name", "ip", "serial", "access_code"}
+        valid_printers = []
+        for p in printers:
+            missing = required_keys - set(p.keys())
+            if missing:
+                logger.warning(f"Impresora inválida, faltan campos {missing}: {p}")
+            else:
+                valid_printers.append(p)
+        
+        if not valid_printers:
+            logger.error("No hay impresoras válidas configuradas")
             return
         
         self.mqtt_manager = MQTTManager(on_state_change=self._on_mqtt_message)
         
-        for printer_conf in printers:
+        for printer_conf in valid_printers:
             self.mqtt_manager.add_printer(printer_conf)
         
         # Conectar a todas
@@ -182,10 +239,11 @@ class PandaPetWindow(QMainWindow):
         self.pushall_timer.timeout.connect(self._request_pushall)
         self.pushall_timer.start(mqtt_config.get("poll_interval_sec", 10) * 1000)
         
-        # Timer para reconexión automática
+        # Timer para reconexión automática (con backoff exponencial)
         self.reconnect_timer = QTimer()
         self.reconnect_timer.timeout.connect(self._check_reconnect)
         self.reconnect_timer.start(mqtt_config.get("reconnect_delay_sec", 5) * 1000)
+        self._reconnect_attempts = {}  # Backoff por impresora
     
     def _on_mqtt_message(self, serial: str, raw_data: dict):
         """Mensaje MQTT recibido de una impresora."""
@@ -206,17 +264,31 @@ class PandaPetWindow(QMainWindow):
             self.mqtt_manager.request_all_status()
     
     def _check_reconnect(self):
-        """Verificar y reconectar impresoras desconectadas."""
+        """Verificar y reconectar impresoras desconectadas con backoff exponencial."""
         if not self.mqtt_manager:
             return
         
         for serial, client in self.mqtt_manager.clients.items():
             if not client.connected and client.client is not None:
-                print(f"[bambuPet] 🔄 Reconectando a {serial}...")
-                try:
-                    client.connect()
-                except Exception as e:
-                    print(f"[bambuPet] ❌ Error reconectando: {e}")
+                # Backoff exponencial: 5s, 10s, 20s, máx 60s
+                attempts = self._reconnect_attempts.get(serial, 0)
+                delay = min(5 * (2 ** attempts), 60)
+                
+                # Solo reconectar si pasó el tiempo de backoff
+                import time
+                last_attempt = getattr(client, '_last_reconnect_attempt', 0)
+                if time.time() - last_attempt >= delay:
+                    logger.info(f"🔄 Reconectando a {serial} (intento {attempts + 1}, delay {delay}s)...")
+                    try:
+                        client._last_reconnect_attempt = time.time()
+                        client.connect()
+                        self._reconnect_attempts[serial] = attempts + 1
+                    except Exception as e:
+                        logger.error(f"❌ Error reconectando a {serial}: {e}")
+                        self._reconnect_attempts[serial] = attempts + 1
+            else:
+                # Resetear contador si está conectado
+                self._reconnect_attempts.pop(serial, None)
     
     # === Interacciones ===
     
@@ -238,16 +310,15 @@ class PandaPetWindow(QMainWindow):
         """Soltar → toggle expandir si fue click simple."""
         if self.dragging and event.button() == Qt.LeftButton:
             self.dragging = False
-            if hasattr(self, 'drag_start'):
-                moved = (event.globalPos() - self.drag_start).manhattanLength()
-                if moved < 5:
-                    self._toggle_expand()
+            moved = (event.globalPos() - self.drag_start).manhattanLength()
+            if moved < 5:
+                self._toggle_expand()
             event.accept()
     
     def _on_js_console_message(self, level, message, line, source):
         """Capturar mensajes del frontend (sliders, etc.)."""
         if message.startswith("bambuPet:"):
-            parts = message.split(":")
+            parts = message.split(":", 2)  # FIX: maxsplit=2 para valores con ":"
             if len(parts) >= 3:
                 action = parts[1]
                 value = parts[2]
@@ -266,7 +337,7 @@ class PandaPetWindow(QMainWindow):
                         self.setWindowOpacity(self._opacity)
                     except ValueError:
                         pass
-
+    
     def _toggle_expand(self):
         """Alternar entre vista compacta y expandida."""
         self.expanded = not self.expanded
@@ -293,8 +364,17 @@ class PandaPetWindow(QMainWindow):
                 event.MouseButtonDblClick,
                 event.MouseMove,
             ):
-                # Reenviar a la ventana
-                QApplication.sendEvent(self, event)
+                # FIX: Mapear coordenadas correctamente
+                global_pos = self.webview.mapToGlobal(event.pos())
+                new_event = event.__class__(
+                    event.type(),
+                    self.mapFromGlobal(global_pos),
+                    global_pos,
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
+                QApplication.sendEvent(self, new_event)
                 return True
         return False
     
@@ -312,6 +392,10 @@ class PandaPetWindow(QMainWindow):
 
 def main():
     """Entry point."""
+    # Configurar logging solo si no está configurado
+    if not logging.root.handlers:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+    
     # Habilitar alta densidad de píxeles
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
@@ -322,8 +406,8 @@ def main():
     window = PandaPetWindow()
     window.show()
     
-    print("🐼 bambuPet iniciado — Click en el panda para expandir")
-    print("   ESC para cerrar")
+    logger.info("🐼 bambuPet iniciado — Click en el panda para expandir")
+    logger.info("   ESC para cerrar")
     
     sys.exit(app.exec_())
 

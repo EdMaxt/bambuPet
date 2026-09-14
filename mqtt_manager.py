@@ -6,8 +6,10 @@ import json
 import ssl
 import threading
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
+import time
 
 try:
     import paho.mqtt.client as mqtt
@@ -15,7 +17,13 @@ except ImportError:
     mqtt = None
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+
+# FIX: No configurar logging básico en módulo — usar handler solo si no hay otros
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 class LocalMQTTClient:
@@ -50,26 +58,32 @@ class LocalMQTTClient:
         self.last_data = {}
         self.last_update = None
         self._lock = threading.Lock()
+        self._pushall_timer = None  # Referencia al timer para cleanup
+        self._last_reconnect_attempt = 0
     
-    def _on_connect(self, client, userdata, flags, rc, properties=None):
-        """Callback al conectar al broker."""
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        """FIX: Firma correcta para paho-mqtt v2."""
+        # En paho-mqtt v2, reason_code es un objeto, no int
+        rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, 'value', 0)
         if rc == 0:
             self.connected = True
             logger.info(f"✅ Conectado a {self.printer_ip} (serial: {self.serial})")
             topic = f"device/{self.serial}/report"
             client.subscribe(topic)
             logger.info(f"   Suscrito a: {topic}")
-            # Solicitar estado completo al conectar
-            import threading
-            threading.Timer(0.5, self.request_full_status).start()
+            # FIX: Guardar referencia al timer
+            self._pushall_timer = threading.Timer(0.5, self.request_full_status)
+            self._pushall_timer.daemon = True
+            self._pushall_timer.start()
             if self.on_connect_callback:
                 self.on_connect_callback(self.serial)
         else:
             self.connected = False
             logger.error(f"❌ Conexión fallida a {self.printer_ip}: código {rc}")
     
-    def _on_disconnect(self, client, userdata, rc, properties=None, reason_code=None):
-        """Callback al desconectar."""
+    def _on_disconnect(self, client, userdata, reason_code, properties=None):
+        """FIX: Firma correcta para paho-mqtt v2."""
+        rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, 'value', 0)
         self.connected = False
         if rc != 0:
             logger.warning(f"⚠️ Desconexión inesperada de {self.printer_ip} (código {rc})")
@@ -84,9 +98,9 @@ class LocalMQTTClient:
                 self.last_data = data
                 self.last_update = datetime.now()
             
-            # Log completo a archivo para debug
-            with open("mqtt_debug.log", "a") as f:
-                f.write(f"{datetime.now().isoformat()} | {self.serial} | {json.dumps(data)}\n")
+            # FIX: Log a archivo con rotación
+            self._log_to_file(data)
+            
             # Log resumen a consola
             mc = data.get("print", {}).get("mc_percent", "N/A")
             stage = data.get("print", {}).get("mc_print_stage", "N/A")
@@ -99,6 +113,36 @@ class LocalMQTTClient:
             logger.error(f"Error parseando mensaje de {self.printer_ip}")
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
+    
+    def _log_to_file(self, data: dict):
+        """Log a archivo con rotación para no llenar el disco."""
+        try:
+            log_handler = self._get_file_handler()
+            log_handler.emit(logging.LogRecord(
+                name=__name__,
+                level=logging.INFO,
+                pathname="",
+                lineno=0,
+                msg=f"{datetime.now().isoformat()} | {self.serial} | {json.dumps(data, default=str)}",
+                args=(),
+                exc_info=None
+            ))
+        except Exception:
+            pass  # Fallo silencioso en logging no crítico
+    
+    @staticmethod
+    def _get_file_handler():
+        """Handler de log con rotación (singleton)."""
+        if not hasattr(LocalMQTTClient, '_file_handler'):
+            handler = RotatingFileHandler(
+                "mqtt_debug.log",
+                maxBytes=1_000_000,  # 1MB
+                backupCount=3,
+                encoding="utf-8"
+            )
+            handler.setFormatter(logging.Formatter('%(message)s'))
+            LocalMQTTClient._file_handler = handler
+        return LocalMQTTClient._file_handler
     
     def connect(self):
         """Conectar al broker MQTT de la impresora."""
@@ -131,6 +175,10 @@ class LocalMQTTClient:
     
     def disconnect(self):
         """Desconectar del broker."""
+        if self._pushall_timer and self._pushall_timer.is_alive():
+            self._pushall_timer.cancel()
+            self._pushall_timer = None
+        
         if self.client:
             self.client.loop_stop()
             self.client.disconnect()
@@ -169,6 +217,7 @@ class MQTTManager:
         self.clients: Dict[str, LocalMQTTClient] = {}
         self.on_state_change = on_state_change
         self._printer_configs: Dict[str, Dict] = {}
+        self._connected_count = 0
     
     def add_printer(self, config: Dict):
         """
@@ -234,16 +283,18 @@ class MQTTManager:
     
     def _handle_connect(self, serial: str):
         """Conexión exitosa."""
+        self._connected_count += 1
         logger.info(f"🟢 {serial} conectado")
     
     def _handle_disconnect(self, serial: str):
         """Desconexión."""
+        self._connected_count = max(0, self._connected_count - 1)
         logger.warning(f"🔴 {serial} desconectado")
     
     @property
     def connected_count(self) -> int:
-        """Número de impresoras conectadas."""
-        return sum(1 for c in self.clients.values() if c.connected)
+        """FIX: Contador incremental en lugar de iterar cada vez."""
+        return self._connected_count
     
     @property
     def total_count(self) -> int:

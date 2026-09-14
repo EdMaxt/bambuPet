@@ -23,20 +23,24 @@ class PrinterStateTracker:
         """
         print_data = raw_data.get("print", {})
         
-        # Si el mensaje trae mc_percent, actualizar
-        if "mc_percent" in print_data:
+        # FIX: Solo actualizar si el valor no es None (no sobrescribir con null)
+        if "mc_percent" in print_data and print_data["mc_percent"] is not None:
             self.last_known["mc_percent"] = print_data["mc_percent"]
         
-        # Si el mensaje trae mc_print_stage, actualizar
-        if "mc_print_stage" in print_data:
+        if "mc_print_stage" in print_data and print_data["mc_print_stage"] is not None:
             self.last_known["mc_print_stage"] = print_data["mc_print_stage"]
         
-        # Si el mensaje trae gcode_state, actualizar
-        if "gcode_state" in print_data:
+        if "gcode_state" in print_data and print_data["gcode_state"] is not None:
+            # FIX: Detectar nuevo print para resetear progreso
+            prev_state = self.last_known.get("gcode_state")
+            if prev_state == "RUNNING" and print_data["gcode_state"] == "RUNNING":
+                pass  # No resetear, mismo print
+            elif print_data["gcode_state"] == "RUNNING" and prev_state != "RUNNING":
+                # Nuevo print iniciado
+                self.last_known["mc_percent"] = 0
             self.last_known["gcode_state"] = print_data["gcode_state"]
         
-        # Si el mensaje trae current_file, actualizar
-        if "gcode_file" in print_data:
+        if "gcode_file" in print_data and print_data["gcode_file"] is not None:
             self.last_known["gcode_file"] = print_data["gcode_file"]
         
         return self.get_enriched_state(raw_data)
@@ -92,8 +96,8 @@ def parse_printer_status(raw_data: Dict) -> Dict[str, Any]:
         "nozzle_temp": nozzle_temp,
         "bed_temp": bed_temp,
         "chamber_light": chamber_light,
-        "raw": raw_data,  # Mantener raw para debug
         "last_update": datetime.now().isoformat()
+        # FIX: Eliminado raw_data del estado parseado (no enviar al frontend)
     }
 
 
@@ -132,8 +136,11 @@ def _extract_nozzle_temp(temp_data: Dict) -> Dict[str, float]:
     """Extraer temperatura del nozzle."""
     result = {"target": 0, "current": 0}
     if "temp" in temp_data and isinstance(temp_data["temp"], list) and len(temp_data["temp"]) >= 2:
-        result["target"] = float(temp_data["temp"][0])
-        result["current"] = float(temp_data["temp"][1])
+        try:
+            result["target"] = float(temp_data["temp"][0])
+            result["current"] = float(temp_data["temp"][1])
+        except (ValueError, TypeError):
+            pass
     return result
 
 
@@ -141,8 +148,11 @@ def _extract_bed_temp(temp_data: Dict) -> Dict[str, float]:
     """Extraer temperatura de la cama."""
     result = {"target": 0, "current": 0}
     if "bed_temp" in temp_data and isinstance(temp_data["bed_temp"], list) and len(temp_data["bed_temp"]) >= 2:
-        result["target"] = float(temp_data["bed_temp"][0])
-        result["current"] = float(temp_data["bed_temp"][1])
+        try:
+            result["target"] = float(temp_data["bed_temp"][0])
+            result["current"] = float(temp_data["bed_temp"][1])
+        except (ValueError, TypeError):
+            pass
     return result
 
 
@@ -162,7 +172,7 @@ def get_print_summary(printers_states: Dict[str, Dict]) -> Dict[str, Any]:
         
         if p < best_priority:
             best_priority = p
-            best_printer = state
+            best_printer = state.copy()  # FIX: No mutar el estado original
             best_printer["serial"] = serial
     
     if best_printer:
