@@ -53,7 +53,15 @@ class PandaPetWindow(QMainWindow):
         # Tamaño inicial (30% más grande: 120 -> 156)
         self.pet_size = 156
         self.expanded_size = 380
-        self.resize(self.pet_size, self.pet_size)
+        
+        # Aplicar scale y opacity de config
+        display = CONFIG.get("display", {})
+        self._scale = display.get("scale", 1.0)
+        self._opacity = display.get("opacity", 0.95)
+        
+        size = int(self.pet_size * self._scale)
+        self.resize(size, size)
+        self.setWindowOpacity(self._opacity)
         
         # Posición inicial (esquina inferior derecha)
         self._position_window()
@@ -61,8 +69,9 @@ class PandaPetWindow(QMainWindow):
     def _position_window(self):
         """Posicionar ventana en esquina inferior derecha."""
         screen = QApplication.primaryScreen().availableGeometry()
-        x = screen.width() - self.pet_size - CONFIG["display"]["offset_x"]
-        y = screen.height() - self.pet_size - CONFIG["display"]["offset_y"]
+        size = int(self.pet_size * self._scale)
+        x = screen.width() - size - CONFIG["display"]["offset_x"]
+        y = screen.height() - size - CONFIG["display"]["offset_y"]
         self.move(x, y)
     
     def _setup_ui(self):
@@ -78,6 +87,7 @@ class PandaPetWindow(QMainWindow):
         # WebEngineView para renderizar el pet HTML/CSS/JS
         self.webview = QWebEngineView()
         self.webview.setContextMenuPolicy(Qt.NoContextMenu)
+        self.webview.page().javaScriptConsoleMessage = self._on_js_console_message
         
         # Hacer el fondo del webview transparente
         page = self.webview.page()
@@ -97,7 +107,22 @@ class PandaPetWindow(QMainWindow):
         self.webview.loadFinished.connect(self._on_load_finished)
     
     def _on_load_finished(self):
-        """Cuando el HTML termina de cargar, inyectar estado."""
+        """Cuando el HTML termina de cargar, inyectar estado y API."""
+        # Inyectar API para comunicación frontend→Python
+        js_api = """
+        window.bambuPetAPI = {
+            receive_message: function(action, value) {
+                if (window.qt) {
+                    // QWebChannel disponible
+                    window.bambuPetBackend.receive_message(action, value);
+                } else {
+                    // Fallback: usar console.log y el event filter lo captura
+                    console.log('bambuPet:' + action + ':' + value);
+                }
+            }
+        };
+        """
+        self.webview.page().runJavaScript(js_api)
         self._inject_state()
     
     def _inject_state(self):
@@ -219,6 +244,29 @@ class PandaPetWindow(QMainWindow):
                     self._toggle_expand()
             event.accept()
     
+    def _on_js_console_message(self, level, message, line, source):
+        """Capturar mensajes del frontend (sliders, etc.)."""
+        if message.startswith("bambuPet:"):
+            parts = message.split(":")
+            if len(parts) >= 3:
+                action = parts[1]
+                value = parts[2]
+                if action == "scale":
+                    try:
+                        self._scale = float(value) / 100.0
+                        if not self.expanded:
+                            size = int(self.pet_size * self._scale)
+                            self.resize(size, size)
+                            self._position_window()
+                    except ValueError:
+                        pass
+                elif action == "opacity":
+                    try:
+                        self._opacity = float(value) / 100.0
+                        self.setWindowOpacity(self._opacity)
+                    except ValueError:
+                        pass
+
     def _toggle_expand(self):
         """Alternar entre vista compacta y expandida."""
         self.expanded = not self.expanded
@@ -226,15 +274,12 @@ class PandaPetWindow(QMainWindow):
         
         if self.expanded:
             self.resize(self.expanded_size, self.expanded_size + 100)
-            # En expandido, el webview recibe clicks (para botones)
-            self.webview.setAttribute(Qt.WA_TransparentForMouseEvents, False)
             self.webview.page().runJavaScript(
                 "window.bambuPet && window.bambuPet.expand();"
             )
         else:
-            self.resize(self.pet_size, self.pet_size)
-            # En compacto, la ventana recibe clicks (para drag)
-            self.webview.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            size = int(self.pet_size * self._scale)
+            self.resize(size, size)
             self.webview.page().runJavaScript(
                 "window.bambuPet && window.bambuPet.collapse();"
             )

@@ -330,7 +330,51 @@
         
         .printer-name-compact.visible { opacity: 1; }
         
-        /* === NO PRINTERS === */
+        /* === SLIDERS === */
+        .slider-container {
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin-top: 8px;
+        }
+
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .slider-label {
+            font-size: 11px;
+            color: #aaa;
+            min-width: 55px;
+        }
+
+        .slider-row input[type="range"] {
+            flex: 1;
+            height: 4px;
+            -webkit-appearance: none;
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .slider-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #00e5ff;
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(0,229,255,0.5);
+        }
+
+        .slider-value {
+            font-size: 11px;
+            color: #00e5ff;
+            min-width: 32px;
+            text-align: right;
+        }
         .no-printers {
             text-align: center;
             color: #888;
@@ -409,6 +453,20 @@
             <button class="panel-close" id="btnClose" title="Minimizar">✕</button>
         </div>
         <div id="printersList"></div>
+
+        <!-- Sliders de tamaño y opacidad -->
+        <div class="slider-container">
+            <div class="slider-row">
+                <span class="slider-label">📐 Tamaño</span>
+                <input type="range" id="sliderSize" min="50" max="200" value="100">
+                <span class="slider-value" id="valSize">100%</span>
+            </div>
+            <div class="slider-row">
+                <span class="slider-label">🔍 Opacidad</span>
+                <input type="range" id="sliderOpacity" min="20" max="100" value="95">
+                <span class="slider-value" id="valOpacity">95%</span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -428,7 +486,11 @@
                     printersList: document.getElementById('printersList'),
                     btnClose: document.getElementById('btnClose'),
                     mqttStatus: document.getElementById('mqttStatus'),
-                    printerNameCompact: document.getElementById('printerNameCompact')
+                    printerNameCompact: document.getElementById('printerNameCompact'),
+                    sliderSize: document.getElementById('sliderSize'),
+                    sliderOpacity: document.getElementById('sliderOpacity'),
+                    valSize: document.getElementById('valSize'),
+                    valOpacity: document.getElementById('valOpacity')
                 };
                 
                 this.elements.btnClose.addEventListener('click', (e) => {
@@ -436,7 +498,68 @@
                     this.collapse();
                 });
                 
+                this.initSliders();
                 console.log('🐼 bambuPet frontend listo');
+            },
+            
+            initSliders() {
+                const savedSize = localStorage.getItem('bambuPet_size');
+                const savedOpacity = localStorage.getItem('bambuPet_opacity');
+                
+                if (savedSize) {
+                    this.elements.sliderSize.value = savedSize;
+                    this.elements.valSize.textContent = savedSize + '%';
+                    this.applySize(savedSize);
+                }
+                
+                if (savedOpacity) {
+                    this.elements.sliderOpacity.value = savedOpacity;
+                    this.elements.valOpacity.textContent = savedOpacity + '%';
+                    this.applyOpacity(savedOpacity);
+                }
+                
+                this.elements.sliderSize.addEventListener('input', (e) => {
+                    const val = e.target.value;
+                    this.elements.valSize.textContent = val + '%';
+                    this.applySize(val);
+                    localStorage.setItem('bambuPet_size', val);
+                    // Notificar a Python
+                    if (window.pywebview) {
+                        window.pywebview.api.set_scale(parseInt(val));
+                    } else if (window.bambuPetAPI) {
+                        window.bambuPetAPI.receive_message('scale', val);
+                    }
+                });
+                
+                this.elements.sliderOpacity.addEventListener('input', (e) => {
+                    const val = e.target.value;
+                    this.elements.valOpacity.textContent = val + '%';
+                    this.applyOpacity(val);
+                    localStorage.setItem('bambuPet_opacity', val);
+                    // Notificar a Python
+                    if (window.pywebview) {
+                        window.pywebview.api.set_opacity(parseInt(val));
+                    } else if (window.bambuPetAPI) {
+                        window.bambuPetAPI.receive_message('opacity', val);
+                    }
+                });
+            },
+            
+            applySize(percent) {
+                const scale = percent / 100;
+                const petContainer = document.querySelector('.pet-container');
+                if (petContainer) {
+                    petContainer.style.transform = `scale(${scale})`;
+                }
+                const pet = document.querySelector('.pet');
+                if (pet) {
+                    pet.style.transform = `scale(${scale})`;
+                }
+            },
+            
+            applyOpacity(percent) {
+                const opacity = percent / 100;
+                document.body.style.opacity = opacity;
             },
             
             updateState(data) {

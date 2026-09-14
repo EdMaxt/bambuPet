@@ -16,6 +16,7 @@
     "offset_x": 20,
     "offset_y": 20,
     "scale": 1.0,
+    "opacity": 0.95,
     "always_on_top": true
   },
   "pet": {
