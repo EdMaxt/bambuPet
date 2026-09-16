@@ -15,9 +15,9 @@
     "position": "bottom-right",
     "offset_x": 20,
     "offset_y": 20,
-    "scale": 1.0,
-    "opacity": 0.95,
-    "always_on_top": true
+    "scale": 2.0,
+    "opacity": 0.2,
+    "always_on_top": false
   },
   "pet": {
     "celebration_duration_sec": 5,

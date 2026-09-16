@@ -261,26 +261,35 @@ class BambuPetWidget(ctk.CTk):
         self._configurar_ventana()
         self._dibujar_pet()
 
-    def _iniciar_mqtt(self):
-        printers = self.config_data.get("mqtt", {}).get("printers", [])
-        if not printers:
-            self._activar_mock()
-            return
-        self.mqtt_manager = MQTTManager(on_state_change=self.actualizar_estado)
-        for p in printers:
-            self.mqtt_manager.add_printer(p)
-        self.mqtt_manager.start_all()
-        self.after(8000, self._verificar_conexion)
 
-    def _verificar_conexion(self):
-        if self.mqtt_manager and self.mqtt_manager.connected_count == 0:
-            logger.warning("Sin conexión → DEMO")
-            self._activar_mock()
 
     def _activar_mock(self):
         self._mock = MockRocky(on_message=self.actualizar_estado)
         self._mock.start()
         self._dibujar_pet()
+
+    def _iniciar_mqtt(self):
+        """Inicia MQTT en un hilo separado para no bloquear la UI."""
+        import threading as _thread
+        printers = self.config_data.get("mqtt", {}).get("printers", [])
+        if not printers:
+            self._activar_mock()
+            return
+        
+        def _connect_mqtt():
+            self.mqtt_manager = MQTTManager(on_state_change=self.actualizar_estado)
+            for p in printers:
+                self.mqtt_manager.add_printer(p)
+            self.mqtt_manager.start_all()
+            import time
+            time.sleep(6)
+            if self.mqtt_manager.connected_count == 0:
+                logger.warning("Sin conexión → activando DEMO")
+                self._activar_mock()
+            else:
+                logger.info(f"✅ {self.mqtt_manager.impresora_conectada_count} conectada(s)")
+        
+        _thread.Thread(target=_connect_mqtt, daemon=True).start()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
