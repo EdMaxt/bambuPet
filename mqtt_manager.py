@@ -81,8 +81,8 @@ class LocalMQTTClient:
             self.connected = False
             logger.error(f"❌ Conexión fallida a {self.printer_ip}: código {rc}")
     
-    def _on_disconnect(self, client, userdata, reason_code, properties=None):
-        """FIX: Firma correcta para paho-mqtt v2."""
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties=None):
+        """Firma correcta para paho-mqtt v2: (self, client, userdata, disconnect_flags, reason_code, properties)."""
         rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, 'value', 0)
         self.connected = False
         if rc != 0:
@@ -174,14 +174,17 @@ class LocalMQTTClient:
             self.connected = False
     
     def disconnect(self):
-        """Desconectar del broker."""
+        """Desconectar del broker de forma segura."""
         if self._pushall_timer and self._pushall_timer.is_alive():
             self._pushall_timer.cancel()
             self._pushall_timer = None
         
         if self.client:
             self.client.loop_stop()
-            self.client.disconnect()
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass  # Ignorar errores al desconectar
             self.connected = False
             logger.info(f"Desconectado de {self.printer_ip}")
     
@@ -218,6 +221,7 @@ class MQTTManager:
         self.on_state_change = on_state_change
         self._printer_configs: Dict[str, Dict] = {}
         self._connected_count = 0
+        self._count_lock = threading.Lock()
     
     def add_printer(self, config: Dict):
         """
@@ -283,12 +287,14 @@ class MQTTManager:
     
     def _handle_connect(self, serial: str):
         """Conexión exitosa."""
-        self._connected_count += 1
+        with self._count_lock:
+            self._connected_count += 1
         logger.info(f"🟢 {serial} conectado")
     
     def _handle_disconnect(self, serial: str):
         """Desconexión."""
-        self._connected_count = max(0, self._connected_count - 1)
+        with self._count_lock:
+            self._connected_count = max(0, self._connected_count - 1)
         logger.warning(f"🔴 {serial} desconectado")
     
     @property

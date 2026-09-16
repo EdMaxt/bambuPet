@@ -1,352 +1,290 @@
-# CODE REVIEW — bambuPet v0.3.0
+# CODE REVIEW — bambuPet v0.3.1
 
-> Fecha: 14 de septiembre de 2026  
-> Revisor: Code Review Técnico  
-> Alcance: `main.py`, `mqtt_manager.py`, `parser.py`, `static/index.html`
+> **Fecha:** 16 de septiembre de 2026  
+> **Versión revisada:** 0.3.1 (post-fixes de code review anterior)  
+> **Alcance:** `main.py`, `mqtt_manager.py`, `parser.py`, `static/index.html`
 
 ---
 
 ## 📊 Resumen Ejecutivo
 
-| Criticidad | Conteo |
-|------------|--------|
-| 🔴 Bugs / Seguridad | 4 |
-| 🟡 Code Smells | 8 |
-| 🟢 Mejoras / Sugerencias | 7 |
+El proyecto recibió múltiples correcciones derivadas del review anterior (v0.3.0). Varios issues críticos fueron resueltos (XSS, firma MQTT, rotación de logs, null checks). Sin embargo, persisten problemas de arquitectura de eventos y oportunidades de mejora en robustez.
 
-El proyecto compila y corre correctamente, pero presenta **riesgos de seguridad XSS**, **manejo de errores inconsistente**, y un **mecanismo de comunicación frontend→Python frágil**. A continuación, el análisis detallado.
-
----
-
-## 1. `main.py`
-
-### 🔴 Bugs
-
-#### 1.1 — Event filter con coordenadas desalineadas (línea 287-298)
-```python
-def eventFilter(self, obj, event):
-    if self._compact_mode and obj == self.webview:
-        if event.type() in (...):
-            QApplication.sendEvent(self, event)
-            return True
-```
-**Problema**: Los eventos de mouse tienen coordenadas relativas al `webview`. Al reenviarlos a `self` (la ventana), las coordenadas no se traducen. Si el layout tuviera márgenes o el webview no ocupara el 100% de la ventana, el drag calcularía offsets incorrectos.  
-**Impacto**: Bajo (actualmente el webview llena toda la ventana).  
-**Solución**: Mapear coordenadas con `obj.mapToGlobal()` o usar `self.handleDrag()` directamente en lugar de reenviar el evento crudo.
-
-#### 1.2 — Carga de configuración sin manejo de errores (línea 19-20)
-```python
-with open(CONFIG_PATH, "r") as f:
-    CONFIG = json.load(f)
-```
-**Problema**: Si `config.json` no existe, tiene JSON inválido, o lacks permisos, la app crashea sin mensaje útil. Además, se ejecuta al importar el módulo, no al instanciar.  
-**Solución**: Envolver en try/except con mensaje descriptivo y defaults.
-
-### 🟡 Code Smells
-
-#### 1.3 — Mezcla de responsabilidades
-`PandaPetWindow` hace demasiado: UI, drag, timers, parsing de mensajes JS, estado MQTT.  
-**Sugerencia**: Extraer el manejo de eventos a una clase `PetWindowBehavior` o usar mixins.
-
-#### 1.4 — `print()` vs `logging`
-Se usa `print()` en toda `main.py` pero `mqtt_manager.py` usa `logging`. Inconsistente.  
-**Sugerencia**: Usar `logging` en toda la app con niveles configurables.
-
-#### 1.5 — `drag_start` condicional (línea 241)
-```python
-if hasattr(self, 'drag_start'):
-```
-Verificar existencia de atributo en cada release es diseño frágil. Mejor inicializar en `__init__`.
-
-### 🟢 Mejoras
-
-#### 1.6 — Persistir scale/opacity en config.json
-Los sliders guardan en `localStorage` (frontend) y notifican a Python, pero al reiniciar la app, Python lee de `config.json` (defaults). Los valores del localStorage nunca se escriben en config.json.  
-**Sugerencia**: Que Python persista los cambios en `config.json` cuando recibe scale/opacity.
+| Criticidad | Conteo | Estado |
+|------------|--------|--------|
+| 🔴 Bugs activos | 3 | Nuevos/Persistentes |
+| 🟡 Code Smells | 6 | Algunos nuevos |
+| 🟢 Mejoras | 5 | Sugerencias adicionales |
 
 ---
 
-## 2. `mqtt_manager.py`
+## ✅ Fixes Aplicados (desde v0.3.0)
 
-### 🔴 Bugs
+Los siguientes issues fueron correctamente resueltos en esta versión:
 
-#### 2.1 — Firma de `_on_connect` incorrecta para paho-mqtt v2 (línea 54)
-```python
-def _on_connect(self, client, userdata, flags, rc, properties=None):
-```
-**Problema**: En paho-mqtt v2, el cuarto parámetro es `reason_code` (un objeto), no `rc` (int). Aunque el código funciona si `rc` llega como int por compatibilidad, podría romperse en versiones futuras. Lo mismo aplica para `_on_disconnect`.  
-**Solución**: Usar la firma oficial: `(client, userdata, flags, reason_code, properties)`.
-
-#### 2.2 — Timer huérfano en `_on_connect` (línea 63-64)
-```python
-import threading
-threading.Timer(0.5, self.request_full_status).start()
-```
-**Problemas**:
-- Re-importa `threading` (ya importado arriba).
-- Si el cliente se desconecta antes de 0.5s, el timer intentará publicar en un cliente potencialmente inválido.
-- El timer no se cancela ni se referencia — no se puede limpiar.
-
-**Sugerencia**: Guardar referencia del timer y cancelarlo en `disconnect()`.
-
-### 🟡 Code Smells
-
-#### 2.3 — Log a archivo sin rotación (línea 87-89)
-```python
-with open("mqtt_debug.log", "a") as f:
-    f.write(...)
-```
-En cada mensaje MQTT se abre, escribe y cierra un archivo. Sin rotación ni límite de tamaño. Una impresora activa puede llenar el disco.  
-**Sugerencia**: Usar `RotatingFileHandler` de logging o desactivar en producción.
-
-#### 2.4 — `logging.basicConfig` en módulo (línea 18)
-```python
-logging.basicConfig(level=logging.INFO, ...)
-```
-Se ejecuta al importar. Si otro módulo importa `mqtt_manager`, configura el logging globalmente — efecto secundario no deseado.  
-**Sugerencia**: Mover a `if __name__ == "__main__"` o a función de setup explícita.
-
-#### 2.5 — Propiedades `connected_count` / `total_count` ineficientes (línea 243-251)
-Se llaman en cada `_inject_state()` (cada mensaje MQTT). Iteran sobre todos los clientes cada vez.  
-**Sugerencia**: Mantener contadores incrementales actualizados en `_handle_connect`/`_handle_disconnect`.
-
-### 🟢 Mejoras
-
-#### 2.6 — TLS inseguro sin advertencia
-```python
-self.client.tls_set(cert_reqs=ssl.CERT_NONE, tls_version=ssl.PROTOCOL_TLS)
-self.client.tls_insecure_set(True)
-```
-Aunque es necesario para BambuLab self-signed, debería loguearse una advertencia visible al usuario la primera vez.
-
-#### 2.7 — Backoff exponencial para reconexión
-`main.py` reconecta cada 5 segundos fijo. Si la impresora está apagada, genera tráfico innecesario.  
-**Sugerencia**: Implementar backoff exponencial (5s, 10s, 20s, máx 60s).
+- [x] Carga de `config.json` con try/except y defaults seguros
+- [x] Firma de `_on_connect`/`_on_disconnect` corregida para paho-mqtt v2
+- [x] Timer de `_on_connect` ahora se referencia y cancela en `disconnect()`
+- [x] `RotatingFileHandler` implementado para `mqtt_debug.log`
+- [x] XSS eliminado: `escapeHtml()` + `createElement` en vez de `innerHTML`
+- [x] `raw_data` eliminado del estado enviado al frontend
+- [x] Valores `null` filtrados en `PrinterStateTracker.update()`
+- [x] Reset de progreso al detectar nuevo print (gcode_state → RUNNING)
+- [x] Código muerto de `pywebview` eliminado
+- [x] Backoff exponencial en reconexión (5s → 10s → 20s → máx 60s)
+- [x] Contadores incrementales (`_connected_count`) en `MQTTManager`
 
 ---
 
-## 3. `parser.py`
+## 🔴 Bugs Activos (v0.3.1)
 
-### 🟡 Code Smells
+### 1. Duplicación de lógica de drag/eventos
+**Archivo:** `main.py`, líneas 295-394
 
-#### 3.1 — `raw_data` incluido en estado parseado (línea 95)
+Existe **duplicación** entre `mousePressEvent`/`mouseReleaseEvent`/`mouseMoveEvent` (líneas 295-316) y `eventFilter` (líneas 358-394). Ambos intentan manejar drag y toggle de expansión.
+
+**Comportamiento problemático:**
+- **Modo compacto**: `eventFilter` captura el evento primero (`return True`), bloqueando `mousePressEvent`. El drag funciona pero el código es confuso.
+- **Modo expandido**: Solo `mousePressEvent` maneja drag; `eventFilter` no interviene.
+- **Doble click**: `eventFilter` retorna `True` (línea 392-393), pero **nunca llama `_toggle_expand`**. Hacer doble click no expande la vista.
+
+**Impacto:** Funcionalidad inconsistente, doble click inútil.
+
+**Sugerencia:** Unificar en un solo mecanismo. Opción recomendada:
 ```python
-"raw": raw_data,
+# Eliminar mousePressEvent/mouseMoveEvent/mouseReleaseEvent
+# Y mover toda la lógica a eventFilter, o viceversa.
 ```
-**Problema**: El diccr completo del mensaje MQTT se incluye en el estado que se serializa a JSON y se envía al frontend vía `runJavaScript`. Mensajes grandes pueden:
-- Saturar el canal JS.
-- Causar performance issues en el parseo JSON de Qt.
-- Exponer datos internos.
-
-**Sugerencia**: Eliminar `raw` del estado enviado al frontend o incluir solo campos específicos de debug.
-
-#### 3.2 — Valores nulos no filtrados (línea 27-28)
-```python
-if "mc_percent" in print_data:
-    self.last_known["mc_percent"] = print_data["mc_percent"]
-```
-Si el mensaje trae `{"print": {"mc_percent": null}}`, se guarda `None` en `last_known`, sobrescribiendo un valor válido anterior.  
-**Sugerencia**: Verificar `if print_data.get("mc_percent") is not None`.
-
-#### 3.3 — Doble parsing implícito
-`PrinterStateTracker.update()` llama a `get_enriched_state()` que llama a `parse_printer_status()`. Los datos crudos se parsean aunque el tracker ya tiene valores conocidos.  
-**Sugerencia**: Solo parsear campos faltantes, no todo el mensaje.
-
-### 🟢 Mejoras
-
-#### 3.4 — Reset de tracker al iniciar nueva impresión
-Si se inicia un nuevo print, el tracker conserva el progreso del print anterior hasta que llegue un nuevo `mc_percent`.  
-**Sugergia**: Detectar cambio de `gcode_state` a `RUNNING` y resetear `mc_percent` a 0.
 
 ---
 
-## 4. `static/index.html`
+### 2. Doble click capturado pero no expande
+**Archivo:** `main.py`, líneas 392-393
 
-### 🔴 Seguridad
+```python
+elif event_type == QEvent.Type.MouseButtonDblClick:
+    return True  # Bloquea pero no expande
+```
 
-#### 4.1 — XSS vía `innerHTML` con datos del servidor (línea 700-717)
+El doble click es capturado y descartado. Si el usuario espera expandir con doble click, no ocurre nada.
+
+**Sugerencia:** Reemplazar `return True` por `self._toggle_expand(); return True`.
+
+---
+
+### 3. `connected_count` puede desincronizarse
+**Archivo:** `mqtt_manager.py`, líneas 289-294
+
+El contador incremental `_connected_count` se incrementa/decremente en callbacks pero:
+- Si `_on_connect` se llama dos veces sin desconexión (reconnect rápido), se duplica.
+- Si `loop_start()` falla silenciosamente pero `connected = True`, el contador se infla.
+
+**Sugerencia:** Eliminar `_connected_count` y derivarlo del estado real:
+```python
+@property
+def connected_count(self) -> int:
+    return sum(1 for c in self.clients.values() if c.connected)
+```
+Esto garantiza consistencia a costa de una iteración ligera.
+
+---
+
+## 🟡 Code Smells (v0.3.1)
+
+### 4. `import time` dentro de método
+**Archivo:** `main.py`, línea 278
+
+```python
+import time
+```
+
+Aunque Python caches imports, es mala práctica. Rompe convenciones PEP 8 y confunde a linters.
+
+**Sugerencia:** Mover al inicio del archivo.
+
+---
+
+### 5. `getattr` innecesario para atributo inicializado en `__init__`
+**Archivo:** `main.py`, línea 279
+
+```python
+last_attempt = getattr(client, '_last_reconnect_attempt', 0)
+```
+
+`_last_reconnect_attempt` se inicializa en `LocalMQTTClient.__init__` (línea 62 de `mqtt_manager.py`). No necesita `getattr`.
+
+**Sugerencia:** Usar acceso directo: `client._last_reconnect_attempt`.
+
+---
+
+### 6. `runJavaScript` sin verificar página lista
+**Archivo:** `main.py`, líneas 193-194
+
+```python
+js = f"window.bambuPet && window.bambuPet.updateState({json_state});"
+self.webview.page().runJavaScript(js)
+```
+
+Si se llama antes de que `_on_load_finished` inyecte la API, falla silenciosamente. No hay retry ni feedback al usuario.
+
+**Sugerencia:** Verificar `self.webview.page().isLoaded()` o encolar llamadas hasta que `loadFinished` emita.
+
+---
+
+### 7. CSS sin clase para estado "unknown"
+**Archivo:** `index.html` / `parser.py`
+
+`parse_printer_status` puede retornar `"unknown"` (línea 136 de `parser.py`), pero no existe `.status-unknown` en CSS. El pet queda sin estilo visible.
+
+**Sugerencia:** Agregar:
+```css
+.status-unknown { background: rgba(150, 150, 150, 0.3); color: #ccc; }
+```
+
+---
+
+### 8. Lógica de estado en parser es densa
+**Archivo:** `parser.py`, líneas 37-45
+
+La máquina de estados para detectar nuevo print es correcta pero difícil de leer:
+```python
+if prev_state == "RUNNING" and print_data["gcode_state"] == "RUNNING":
+    pass
+elif print_data["gcode_state"] == "RUNNING" and prev_state != "RUNNING":
+    if "mc_percent" not in print_data:
+        self.last_known["mc_percent"] = 0
+```
+
+**Sugerencia:** Agregar comentario tipo state machine:
+```
+# States: IDLE → RUNNING (reset progress if no mc_percent)
+#         RUNNING → RUNNING (preserve progress)
+#         RUNNING → IDLE (preserve last known)
+```
+
+---
+
+### 9. `request_full_status` sin rate limiting
+**Archivo:** `mqtt_manager.py`, líneas 196-206
+
+Si `request_all_status()` se llama repetidamente (bug, timer rápido), podría floodear la red local.
+
+**Sugerencia:** Agregar debounce de 2 segundos:
+```python
+def request_full_status(self):
+    if time.time() - getattr(self, '_last_pushall', 0) < 2:
+        return
+    self._last_pushall = time.time()
+    # ... resto del código
+```
+
+---
+
+## 🟢 Mejoras Sugeridas
+
+### 10. Mejorar parsing de mensajes frontend
+**Archivo:** `main.py`, línea 321
+
+```python
+parts = message.split(":", 2)
+```
+
+Si el valor contiene `":"` (ej: `"scale:100:extra"`), el split lo corrompe. Aunque actualmente solo se usan números, es frágil.
+
+**Sugerencia:** Usar JSON estructurado:
 ```javascript
-container.innerHTML = printers.map(p => {
-    const fileStr = p.current_file ? `<div ...>📄 ${p.current_file}</div>` : '';
-    return `
-        <div class="printer-card">
-            <div class="printer-name">🖨️ ${p.name}</div>
-            ...
-            ${fileStr}
-        </div>
-    `;
-}).join('');
+// Frontend
+console.log('bambuPet:' + JSON.stringify({action: 'scale', value: 100}));
 ```
-**Problema**: Si `p.name` o `p.current_file` contienen HTML (ej: `<img src=x onerror=alert(1)>` o `<script>...</script>`), se ejecuta JavaScript arbitrario. Un nombre de archivo malicioso en la impresora (o un MQTT inyectado) compromete la app.  
-**Impacto**: **Alto** — aunque la fuente es "local" (MQTT de impresora), un ataque MITM en la red local podría inyectar payloads.  
-**Solución**: Escapar HTML antes de insertar, o usar `textContent` y createElement en lugar de template literals.
-
-### 🟡 Code Smells
-
-#### 4.2 — Código muerto: `window.pywebview` (línea 527, 540)
-```javascript
-if (window.pywebview) {
-    window.pywebview.api.set_scale(parseInt(val));
-} else if (window.bambuPetAPI) {
-    ...
-}
-```
-`pywebview` es un framework diferente (no PyQt5). Estas líneas nunca se ejecutan.  
-**Sugerencia**: Eliminar.
-
-#### 4.3 — Sin escape de HTML en `printerNameCompact` (línea 587)
-```javascript
-this.elements.printerNameCompact.textContent = activePrinter.name || 'Printer';
-```
-Esta línea usa `textContent` (seguro), pero `p.name` en `renderPrintersList` usa `innerHTML` (inseguro). Inconsistente.
-
-### 🟢 Mejoras
-
-#### 4.4 — Debounce en sliders
-Los sliders notifican a Python en cada evento `input`. Si se mueve rápido, se envían decenas de mensajes.  
-**Sugerencia**: Debounce de 100-200ms antes de llamar a `bambuPetAPI.receive_message`.
-
----
-
-## 5. Comunicación Frontend → Python (console.log + eventFilter)
-
-### Arquitectura actual:
-```
-[Slider JS] → console.log('bambuPet:scale:100')
-     ↓
-[QWebEnginePage.javaScriptConsoleMessage]
-     ↓
-[_on_js_console_message parsea string]
-     ↓
-[Aplica cambio en ventana]
-```
-
-### Problemas identificados:
-
-| Problema | Criticidad | Descripción |
-|----------|------------|-------------|
-| **Sin confirmación** | 🟡 | El frontend no sabe si Python recibió/procesó el mensaje. |
-| **Pérdida de mensajes** | 🟡 | Console.log es best-effort. Mensajes rápidos pueden coalescer. |
-| **Parsing frágil** | 🟡 | Split por `:`. Si el valor contiene `:`, se corrompe. |
-| **Sin serialización** | 🟡 | No hay request_id para correlacionar. |
-| **Formato implícito** | 🟡 | `action:value` es un protocolo no documentado. |
-
-### Sugerencia de mejora:
-Implementar **QWebChannel** para comunicación bidireccional real:
-- Permite llamadas directas Python↔JS.
-- Es soportado nativamente por PyQt5.
-- Elimina la necesidad de parsing de strings.
-
-Alternativa rápida: usar `window.bambuPetAPI.receive_message()` con JSON estructurado:
-```javascript
-window.bambuPetAPI.receive_message(JSON.stringify({action: 'scale', value: 100}));
-```
-Y en Python:
 ```python
-data = json.loads(message.split(":", 1)[1])
+# Python
+data = json.loads(message[len("bambuPet:"):])
 ```
 
 ---
 
-## 6. Otros Hallazgos
+### 11. Validar tipo de `lights_report`
+**Archivo:** `parser.py`, línea 72
 
-### 6.1 — `dashboard/` carpeta sin conectar
-Existe una carpeta `dashboard/` con su propio `index.html`, `style.css`, `app.js` que no está conectada a `main.py`. Genera confusión sobre cuál es el frontend activo.
+```python
+lights_data = raw_data.get("lights_report", [{}])[0] if raw_data.get("lights_report") else {}
+```
 
-### 6.2 — Sin validación de configuración
-`config.json` no se valida al cargar. Si falta un campo (`access_code`, `serial`), la app crashea en tiempo de ejecución con `KeyError`.  
-**Sugerencia**: Usar un schema o validación explícita.
+Si `lights_report` es un dict en vez de lista, `.get("mode")` funciona pero la lógica es inconsistente.
 
-### 6.3 — Sin graceful degradation
-Si MQTT falla, el pet queda congelado en el último estado. El usuario no sabe si:
-- La impresora está offline.
-- La red falló.
-- El access_code expiró.
-
-**Sugercia**: Mostrar indicador de "stale data" si no se reciben mensajes en X segundos.
+**Sugerencia:** Validar tipo:
+```python
+lights_report = raw_data.get("lights_report", [])
+lights_data = lights_report[0] if isinstance(lights_report, list) and lights_report else {}
+```
 
 ---
 
-## 📋 Plan de Acción Recomendado
+### 12. Debounce en sliders
+**Archivo:** `index.html`, líneas 521-535
 
-### Prioridad Alta (Seguridad)
-1. [ ] Escapar HTML en `renderPrintersList` y todo `innerHTML` con datos del servidor.
-2. [ ] Eliminar código muerto (`pywebview`).
+Los sliders notifican a Python en cada evento `input`. Si se mueve rápido, se envían decenas de mensajes.
 
-### Prioridad Media (Robustez)
-3. [ ] Corregir firmas de callbacks MQTT para paho-mqtt v2.
-4. [ ] Agregar try/except en carga de `config.json`.
-5. [ ] Validar valores nulos en `PrinterStateTracker.update()`.
-6. [ ] Eliminar `raw_data` del estado enviado al frontend.
-7. [ ] Agregar rotación de logs o desactivar `mqtt_debug.log` por defecto.
+**Sugerencia:** Debounce de 150ms:
+```javascript
+let debounceTimer;
+this.elements.sliderSize.addEventListener('input', (e) => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        window.bambuPetAPI.receive_message('scale', val);
+    }, 150);
+});
+```
 
-### Prioridad Baja (Mejoras)
-8. [ ] Implementar QWebChannel para comunicación frontend↔Python.
-9. [ ] Unificar logging (usar `logging` en toda la app).
-10. [ ] Persistir scale/opacity en `config.json` desde Python.
-11. [ ] Implementar backoff exponencial en reconexiones.
-12. [ ] Debounce en sliders frontend.
-13. [ ] Agregar stale-data indicator si no hay mensajes MQTT en X tiempo.
+---
+
+### 13. Agregar `.gitignore`
+No existe `.gitignore` en el proyecto. Archivos que deberían excluirse:
+```
+config.json
+mqtt_debug.log
+__pycache__/
+*.pyc
+```
+
+---
+
+### 14. Considerar QWebChannel para comunicación robusta
+El mecanismo actual (`console.log` → `javaScriptConsoleMessage`) es funcional pero frágil. **QWebChannel** permitiría:
+- Llamadas directas Python↔JS sin parsing de strings
+- Callbacks con confirmación
+- Tipado fuerte
+
+**Impacto:** Medio-Alto (requiere reestructurar comunicación).
+
+---
+
+## 📋 Plan de Acción Recomendado (v0.3.1)
+
+### Prioridad Alta
+1. [ ] **Unificar manejo de eventos** — Elegir entre eventFilter o mouse events, no ambos
+2. [ ] **Arreglar doble click** — Hacer que expanda en vez de solo bloquear
+3. [ ] **Eliminar `_connected_count` incremental** — Derivar de estado real
+
+### Prioridad Media
+4. [ ] Mover `import time` al inicio de `main.py`
+5. [ ] Reemplazar `getattr` por acceso directo
+6. [ ] Agregar `.gitignore`
+7. [ ] CSS para `.status-unknown`
+8. [ ] Validar tipo de `lights_report`
+
+### Prioridad Baja
+9. [ ] Rate limiting en `request_full_status`
+10. [ ] Debounce en sliders frontend
+11. [ ] QWebChannel (mejora futura)
+12. [ ] Comentarios de state machine en parser
 
 ---
 
 ## 📝 Notas Finales
 
-El proyecto es funcional y demuestra dominio de PyQt5 + MQTT. Los problemas encontrados son típicos de un prototipo en evolución. La corrección del XSS y la estabilización de la comunicación frontend↔Python deberían ser las próximas prioridades antes de considerar un release público.
+El proyecto muestra una evolución positiva desde v0.3.0. Los fixes de seguridad (XSS), logging (rotación) y robustez (null checks, backoff) demuestran响应ividad a feedback.
 
-> 🐼 **bambuPet** — buen proyecto, necesita hardening de seguridad.
+Los problemas restantes son principalmente de **consistencia arquitectónica** (duplicación de eventos) y **defensas profundas** (parsing frágil, race conditions). Ninguno es bloqueante para uso personal, pero deberían resolverse antes de un release público.
 
----
-
-## 🔬 Análisis Adicional con qwen2.5-coder:14B (Ollama Local)
-
-Se corrió un segundo análisis automatizado con `qwen2.5-coder:14b` local que validó y complementó los hallazgos previos:
-
-### Confirmados por modelo local:
-1. **Race condition en `_on_mqtt_message`**: Actualización de `self.printer_states` e inyección a UI no es atómica si llegan mensajes simultáneos de múltiples impresoras.
-2. **Falta de sanitización XSS**: Confirmado en `p.current_file` — el modelo sugiere función `escapeHtml()` explícita.
-3. **QWebEngineView memory**: El modelo advierte sobre uso intensivo de memoria si el HTML/CSS/JS crece en complejidad.
-4. **Reconexión sin backoff**: Reintentar cada 5s fijo puede generar tormenta de reconexión si múltiples impresoras están offline simultáneamente.
-
-### Hallazgo adicional:
-5. **Sin verificación de certificado TLS**: Aunque necesario para self-signed de BambuLab, debería haber un one-time warning al usuario aceptando el riesgo.
-
----
-
-## 📊 Resumen Final de Hallazgos
-
-| # | Archivo | Línea | Tipo | Criticidad | Descripción |
-|---|---------|-------|------|------------|-------------|
-| 1 | `index.html` | 700-717 | XSS | 🔴 Alta | `innerHTML` con `p.name` y `p.current_file` sin escapar |
-| 2 | `main.py` | 19-20 | Crasheo | 🔴 Alta | `config.json` sin try/except ni validación de schema |
-| 3 | `mqtt_manager.py` | 54 | Bug | 🟡 Media | Callback `_on_connect` con firma paho v2 incorrecta (rc vs reason_code) |
-| 4 | `mqtt_manager.py` | 63-64 | Mem leak | 🟡 Media | Timer huérfano sin referencia ni cleanup en disconnect |
-| 5 | `mqtt_manager.py` | 87-89 | Perf | 🟡 Media | Log a archivo sin rotación (mqtt_debug.log) |
-| 6 | `parser.py` | 27-28 | Bug | 🟡 Media | Valores `null` sobrescriben `last_known` válidos |
-| 7 | `parser.py` | 95 | Perf | 🟡 Media | `raw_data` completo enviado a frontend innecesariamente |
-| 8 | `main.py` | 287-298 | Bug | 🟡 Media | Event filter reenvía eventos sin mapear coordenadas |
-| 9 | `mqtt_manager.py` | 164 | Race | 🟡 Media | `_on_mqtt_message` no es atómica (state + UI) |
-| 10 | `index.html` | 527,540 | Muerto | 🟡 Baja | Referencias a `pywebview` (framework diferente) |
-| 11 | `mqtt_manager.py` | 243-251 | Perf | 🟡 Baja | Contadores recomputados en cada mensaje |
-| 12 | `main.py` | 241 | Smell | 🟡 Baja | `hasattr` en lugar de inicializar en `__init__` |
-| 13 | `main.py` | 172-201 | Perf | 🟡 Baja | Sin backoff exponencial en reconexión MQTT |
-
----
-
-## ✅ Checklist de Fixes Aplicados
-
-```
-[ ] 1. Agregar escapeHtml() y sanitizar todo innerHTML con datos MQTT
-[ ] 2. Envolver carga de config.json en try/except con defaults
-[ ] 3. Corregir firmas de callbacks MQTT (reason_code en lugar de rc)
-[ ] 4. Guardar referencia del timer en _on_connect y cancelar en disconnect()
-[ ] 5. Usar RotatingFileHandler o desactivar mqtt_debug.log
-[ ] 6. Filtrar valores null en PrinterStateTracker.update()
-[ ] 7. Eliminar "raw" del estado enviado a frontend
-[ ] 8. Mapear coordenadas en eventFilter
-[ ] 9. Eliminar código muerto de pywebview
-[ ] 10. Mantener contadores incrementales en MQTTManager
-[ ] 11. Implementar backoff exponencial en reconexión
-[ ] 12. Agregar stale-data indicator si no hay mensajes MQTT
-[ ] 13. Validar config.json al inicio (todos los campos requeridos)
-```
+> 🐼 **bambuPet v0.3.1** — Buen progreso, hardening casi completo.

@@ -293,27 +293,16 @@ class PandaPetWindow(QMainWindow):
     # === Interacciones ===
     
     def mousePressEvent(self, event):
-        """Click → iniciar drag."""
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.drag_offset = event.globalPos() - self.frameGeometry().topLeft()
-            self.drag_start = event.globalPos()
-            event.accept()
-    
+        """Drag manejado exclusivamente por eventFilter."""
+        pass
+
     def mouseMoveEvent(self, event):
-        """Mover ventana al arrastrar."""
-        if self.dragging and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self.drag_offset)
-            event.accept()
-    
+        """Drag manejado exclusivamente por eventFilter."""
+        pass
+
     def mouseReleaseEvent(self, event):
-        """Soltar → toggle expandir si fue click simple."""
-        if self.dragging and event.button() == Qt.LeftButton:
-            self.dragging = False
-            moved = (event.globalPos() - self.drag_start).manhattanLength()
-            if moved < 5:
-                self._toggle_expand()
-            event.accept()
+        """Drag manejado exclusivamente por eventFilter."""
+        pass
     
     def _on_js_console_message(self, level, message, line, source):
         """Capturar mensajes del frontend (sliders, etc.)."""
@@ -356,25 +345,41 @@ class PandaPetWindow(QMainWindow):
             )
 
     def eventFilter(self, obj, event):
-        """Redirigir eventos de mouse del webview a la ventana (para drag en compacto)."""
+        """Manejar drag directamente desde el eventFilter (sin reenviar eventos)."""
         if self._compact_mode and obj == self.webview:
-            if event.type() in (
-                event.MouseButtonPress,
-                event.MouseButtonRelease,
-                event.MouseButtonDblClick,
-                event.MouseMove,
+            # FIX: Verificar que sea evento de mouse antes de acceder a globalPos()
+            from PyQt5.QtCore import QEvent
+            
+            event_type = event.type()
+            if event_type not in (
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+                QEvent.Type.MouseButtonDblClick,
+                QEvent.Type.MouseMove,
             ):
-                # FIX: Mapear coordenadas correctamente
-                global_pos = self.webview.mapToGlobal(event.pos())
-                new_event = event.__class__(
-                    event.type(),
-                    self.mapFromGlobal(global_pos),
-                    global_pos,
-                    event.button(),
-                    event.buttons(),
-                    event.modifiers()
-                )
-                QApplication.sendEvent(self, new_event)
+                return False
+            
+            # Ahora es seguro acceder a globalPos()
+            global_pos = event.globalPos()
+            
+            if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.LeftButton:
+                self.dragging = True
+                self.drag_offset = global_pos - self.frameGeometry().topLeft()
+                self.drag_start = global_pos
+                return True
+            elif event_type == QEvent.Type.MouseMove and self.dragging:
+                if event.buttons() == Qt.LeftButton:
+                    new_pos = global_pos - self.drag_offset
+                    self.move(new_pos)
+                return True
+            elif event_type == QEvent.Type.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self.dragging = False
+                moved = (global_pos - self.drag_start).manhattanLength()
+                if moved < 5:
+                    self._toggle_expand()
+                return True
+            elif event_type == QEvent.Type.MouseButtonDblClick:
+                self._toggle_expand()
                 return True
         return False
     
