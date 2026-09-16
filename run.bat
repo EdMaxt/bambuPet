@@ -9,20 +9,10 @@ echo    bambuPet v0.4.0
 echo    Tkinter Widget
 echo ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-:: Buscar Python (evitar Windows Store stub)
-set "PYEXE="
-if exist "C:\Users\edmax\AppData\Local\Programs\Python\Python314\python.exe" (
-    set "PYEXE=C:\Users\edmax\AppData\Local\Programs\Python\Python314\python.exe"
-) else if exist "C:\Users\edmax\AppData\Local\Python\bin\python.exe" (
+:: Usar Python 3.14 explícitamente
+set "PYEXE=C:\Users\edmax\AppData\Local\Programs\Python\Python314\python.exe"
+if not exist "%PYEXE%" (
     set "PYEXE=C:\Users\edmax\AppData\Local\Python\bin\python.exe"
-) else (
-    where python >nul 2>&1
-    if not errorlevel 1 (
-        for /f "tokens=*" %%i in ('python -c "import sys; print(sys.executable)"') do (
-            echo %%i | findstr /i "WindowsApps" >nul
-            if errorlevel 1 set "PYEXE=%%i"
-        )
-    )
 )
 
 if not defined PYEXE (
