@@ -143,8 +143,8 @@ class BambuPetWidget(ctk.CTk):
 
         states = self._get_enriched_states()
         if states:
-            from parser import get_print_summary
-            summary = get_print_summary({s: st for s, st in zip(states.keys(), states.values())})
+            from parser import get_print_summary as gps
+            summary = gps({s: st for s, st in zip(states.keys(), states.values())})
         else:
             summary = None
         progress = 0
@@ -192,8 +192,10 @@ class BambuPetWidget(ctk.CTk):
         # Indicador de modo
         if self._mock:
             self.canvas.create_text(size - 30, 15, text="DEMO", font=("Segoe UI", int(7 * scale), "bold"), fill="#ffd93d")
-        elif self.mqtt_manager and self.mqtt_manager.connected_count == 0:
-            self.canvas.create_text(size - 25, 15, text="OFF", font=("Segoe UI", int(7 * scale), "bold"), fill="#f38ba8")
+        elif self.mqtt_manager and self.mqtt_manager.connected_count > 0:
+            self.canvas.create_oval(size - 20, 10, size - 10, 20, fill="#6bcb77", outline="")
+        else:
+            self.canvas.create_oval(size - 20, 10, size - 10, 20, fill="#f38ba8", outline="")
 
     def _get_enriched_states(self) -> Dict[str, dict]:
         result = {}
@@ -244,14 +246,15 @@ class BambuPetWidget(ctk.CTk):
 
     def _on_right_click(self, event):
         """Click derecho → menú contextual."""
-        import tkinter as tk
-        menu = tk.Menu(self.root, tearoff=0, bg="#1e1e2e", fg="#cdd6f4")
-        menu.add_command(label="⚙️ Configuración", command=self._abrir_settings)
-        menu.add_command(label="🔄 Reconectar", command=lambda: None)
-        menu.add_separator()
-        menu.add_command(label="❌ Salir", command=self.destroy)
-        menu.tk_popup(event.x_root, event.y_root)
-        menu.grab_release()
+        menu = ctk.CTkToplevel(self)
+        menu.overrideredirect(True)
+        menu.attributes("-topmost", True)
+        menu.geometry(f"+{event.x_root}+{event.y_root}")
+        frame = ctk.CTkFrame(menu, fg_color="#1e1e2e", corner_radius=8, border_width=1, border_color="#313244")
+        frame.pack()
+        for text, cmd in [("⚙️ Configuración", self._abrir_settings), ("🔄 Reconectar", lambda: None), ("❌ Salir", self.destroy)]:
+            ctk.CTkButton(frame, text=text, command=lambda c=cmd: (menu.destroy(), c()), fg_color="transparent", hover_color="#313244", text_color="#cdd6f4", anchor="w", height=30, width=180).pack(fill="x", padx=5, pady=2)
+        menu.bind("<FocusOut>", lambda e: menu.destroy())
 
     def _abrir_settings(self):
         SettingsWindow(self, self.config_data, on_save=self._aplicar_config)
@@ -260,8 +263,6 @@ class BambuPetWidget(ctk.CTk):
         self.config_data = new_config
         self._configurar_ventana()
         self._dibujar_pet()
-
-
 
     def _activar_mock(self):
         self._mock = MockRocky(on_message=self.actualizar_estado)
@@ -287,7 +288,7 @@ class BambuPetWidget(ctk.CTk):
                 logger.warning("Sin conexión → activando DEMO")
                 self._activar_mock()
             else:
-                logger.info(f"✅ {self.mqtt_manager.impresora_conectada_count} conectada(s)")
+                logger.info(f"✅ {self.mqtt_manager.connected_count} conectada(s)")
         
         _thread.Thread(target=_connect_mqtt, daemon=True).start()
 
@@ -306,7 +307,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.geometry("360x380")
         self.resizable(False, False)
         self.transient(parent)
-        self.grab_set()
+        # FIX: No usar grab_set — causa errores de focus en CustomTkinter
 
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() // 2) - 180
