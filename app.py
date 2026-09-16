@@ -574,8 +574,9 @@ class BambuPetApp:
     def _crear_ui(self):
         """Crea la interfaz de usuario."""
         self.root = tk.Tk()
-        self.root.withdraw()  # Ocultar root principal
-
+        # FIX: No usar withdraw — mostrar la ventana directamente
+        self.root.title("bambuPet")
+        
         # Crear ventana del pet
         self.pet_window = PetWindow(self.root, self.config)
 
@@ -590,6 +591,10 @@ class BambuPetApp:
         self.pet_window.set_settings_callback(
             lambda: self.settings_panel.abrir()
         )
+        
+        # Asegurar que la ventana sea visible
+        self.root.update_idletasks()
+        self.root.deiconify()
 
     def _iniciar_mqtt(self):
         """Inicia conexiones MQTT."""
