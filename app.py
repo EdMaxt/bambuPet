@@ -137,10 +137,19 @@ class BambuPetWidget(ctk.CTk):
         size = int(self.PET_SIZE * scale)
         center = size // 2
 
-        summary = get_print_summary(self._get_enriched_states())
-        progress = summary.get("progress", 0) if summary else 0
-        status = summary.get("status", "idle") if summary else "idle"
-        name = summary.get("name", "") if summary else ""
+        states = self._get_enriched_states()
+        if states:
+            from parser import get_print_summary
+            summary = get_print_summary({s: st for s, st in zip(states.keys(), states.values())})
+        else:
+            summary = None
+        progress = 0
+        status = "idle"
+        name = ""
+        if isinstance(summary, dict):
+            progress = summary.get("progress", 0)
+            status = summary.get("status", "idle")
+            name = summary.get("name", "")
 
         status_colors = {
             "printing": "#00e5ff", "paused": "#ffd93d", "done": "#6bcb77",
