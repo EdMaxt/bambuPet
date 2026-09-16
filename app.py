@@ -132,7 +132,11 @@ class BambuPetWidget(ctk.CTk):
             widget.bind("<Button-3>", self._on_right_click)
 
     def _dibujar_pet(self):
-        self.canvas.delete("all")
+        """Dibuja el pet en el canvas."""
+        try:
+            self.canvas.delete("all")
+        except Exception:
+            return
         scale = self.config_data["display"].get("scale", 1.0)
         size = int(self.PET_SIZE * scale)
         center = size // 2
@@ -239,15 +243,15 @@ class BambuPetWidget(ctk.CTk):
         self._drag_data["dragging"] = False
 
     def _on_right_click(self, event):
-        menu = ctk.CTkToplevel(self)
-        menu.overrideredirect(True)
-        menu.geometry(f"+{event.x_root}+{event.y_root}")
-        frame = ctk.CTkFrame(menu, fg_color="#1e1e2e", corner_radius=8)
-        frame.pack()
-        for text, cmd in [("⚙️ Configuración", self._abrir_settings), ("🔄 Reconectar", lambda: None), ("❌ Salir", self.destroy)]:
-            ctk.CTkButton(frame, text=text, command=lambda c=cmd: (menu.destroy(), c()), fg_color="transparent", hover_color="#313244", text_color="#cdd6f4", anchor="w", height=30).pack(fill="x", padx=5, pady=2)
-        menu.bind("<FocusOut>", lambda e: menu.destroy())
-        menu.focus_force()
+        """Click derecho → menú contextual."""
+        import tkinter as tk
+        menu = tk.Menu(self.root, tearoff=0, bg="#1e1e2e", fg="#cdd6f4")
+        menu.add_command(label="⚙️ Configuración", command=self._abrir_settings)
+        menu.add_command(label="🔄 Reconectar", command=lambda: None)
+        menu.add_separator()
+        menu.add_command(label="❌ Salir", command=self.destroy)
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
 
     def _abrir_settings(self):
         SettingsWindow(self, self.config_data, on_save=self._aplicar_config)
