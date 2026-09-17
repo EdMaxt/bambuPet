@@ -1,5 +1,5 @@
 """
-bambuPet v0.5.0 - Entry point con CustomTkinter
+bambuPet v0.6.0 - Tkinter nativo + CTk para settings
 Widget desktop para monitoreo de impresoras BambuLab
 """
 
@@ -8,7 +8,7 @@ import os
 import json
 import logging
 import threading
-import customtkinter as ctk
+import tkinter as tk
 from typing import Dict, Optional
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +18,6 @@ if PROJECT_DIR not in sys.path:
 from parser import PrinterStateTracker, get_print_summary
 from mqtt_manager import MQTTManager
 from mock_rocky import MockRocky
-
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -50,7 +47,10 @@ def guardar_config(config: dict):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
-class BambuPetWidget(ctk.CTk):
+
+class BambuPetWidget(tk.Tk):
+    """Widget principal de bambuPet - Tkinter nativo."""
+
     PET_SIZE = 156
 
     def __init__(self):
@@ -72,15 +72,13 @@ class BambuPetWidget(ctk.CTk):
         size = int(self.PET_SIZE * scale)
         self.geometry(f"{size}x{size}+0+0")
         self.resizable(False, False)
+        self.overrideredirect(True)
         
         if self.config_data["display"].get("always_on_top", True):
             self.attributes("-topmost", True)
         
         opacity = self.config_data["display"].get("opacity", 0.95)
         self.attributes("-alpha", opacity)
-        
-        if sys.platform == "win32":
-            self.overrideredirect(True)
         
         self._posicionar_ventana()
 
@@ -101,56 +99,49 @@ class BambuPetWidget(ctk.CTk):
         
         scale = self.config_data["display"].get("scale", 1.0)
         size = int(self.PET_SIZE * scale)
+        
+        bg_color = "#1e1e2e"
+        fg_color = "#cdd6f4"
+        accent = "#00e5ff"
 
-        self.main_frame = ctk.CTkFrame(
+        # Frame circular
+        self.canvas = tk.Canvas(
             self, width=size, height=size,
-            corner_radius=size // 2,
-            fg_color="#1e1e2e", border_width=2, border_color="#00e5ff"
+            bg=bg_color, highlightthickness=0
         )
-        self.main_frame.pack_propagate(False)
-        self.main_frame.pack(expand=True, fill="both")
+        self.canvas.pack(expand=True, fill="both")
 
-        self.canvas = ctk.CTkCanvas(
-            self.main_frame, width=size - 20, height=size - 40,
-            bg="#1e1e2e", highlightthickness=0
-        )
-        self.canvas.pack(expand=True, fill="both", padx=10, pady=10)
-
-        self.info_label = ctk.CTkLabel(
-            self.main_frame, text="",
-            font=ctk.CTkFont(size=max(8, int(9 * scale))),
-            text_color="#a0a0a0",
-            wraplength=size - 30,
-            justify="center"
+        # Info label
+        self.info_label = tk.Label(
+            self, text="", font=("Segoe UI", max(8, int(9 * scale))),
+            bg=bg_color, fg="#a0a0a0", wraplength=size-20
         )
         self.info_label.pack(side="bottom", pady=(0, 15))
 
-        self.btn_settings = ctk.CTkButton(
-            self.main_frame, text="⚙️", width=28, height=28,
-            corner_radius=14, fg_color="#313244", hover_color="#45475a",
-            text_color="#cdd6f4", font=ctk.CTkFont(size=14),
-            command=self._mostrar_menu_contextual
+        # Boton settings
+        self.btn_settings = tk.Button(
+            self, text="⚙️", font=("Segoe UI Emoji", 14),
+            bg="#313244", fg=fg_color, activebackground="#45475a",
+            activeforeground=fg_color, bd=0, padx=4, pady=2,
+            command=self._mostrar_menu
         )
         self.btn_settings.place(relx=1.0, rely=0.0, anchor="ne", x=-8, y=8)
 
-        for widget in [self, self.main_frame, self.canvas, self.info_label]:
-            widget.bind("<ButtonPress-1>", self._on_drag_start)
+        # Bindings
+        for widget in [self, self.canvas, self.info_label]:
+            widget.bind("<Button-1>", self._on_drag_start)
             widget.bind("<B1-Motion>", self._on_drag_motion)
             widget.bind("<ButtonRelease-1>", self._on_drag_end)
-            widget.bind("<Button-3>", self._mostrar_menu_contextual)
+            widget.bind("<Button-3>", self._mostrar_menu)
 
         self._dibujar_pet()
 
     def _dibujar_pet(self):
-        try:
-            self.canvas.delete("all")
-        except Exception:
-            return
-
+        self.canvas.delete("all")
         scale = self.config_data["display"].get("scale", 1.0)
         size = int(self.PET_SIZE * scale)
-        center_x = (size - 20) // 2
-        center_y = (size - 40) // 2
+        cx, cy = size // 2, size // 2
+        r = size // 2 - 15
 
         states = self._get_enriched_states()
         summary = get_print_summary(states) if states else None
@@ -171,43 +162,38 @@ class BambuPetWidget(ctk.CTk):
         }
         color = status_colors.get(status, "#6c7086")
 
-        margin = 12
-        self.canvas.create_oval(
-            margin, margin, size - 20 - margin, size - 40 - margin,
-            fill="#313244", outline=color, width=3
-        )
+        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#313244", outline=color, width=3)
 
         if progress > 0 and status == "printing":
-            bbox = (margin + 5, margin + 5, size - 20 - margin - 5, size - 40 - margin - 5)
+            bbox = (cx-r+5, cy-r+5, cx+r-5, cy+r-5)
             extent = (progress / 100) * 360
             self.canvas.create_arc(bbox, start=-90, extent=extent, outline=color, width=4, style="arc")
 
         if status == "printing":
             text = f"{progress}%"
-            font_size = int(26 * scale)
+            fs = int(24 * scale)
         elif status in ("done", "finished"):
             text = "✓"
-            font_size = int(34 * scale)
+            fs = int(32 * scale)
         elif status == "error":
             text = "⚠"
-            font_size = int(30 * scale)
+            fs = int(28 * scale)
         elif status == "paused":
             text = "⏸"
-            font_size = int(26 * scale)
+            fs = int(24 * scale)
         else:
             text = "🐼"
-            font_size = int(30 * scale)
+            fs = int(28 * scale)
 
-        text_color = color if status != "idle" else "#cdd6f4"
-        self.canvas.create_text(center_x, center_y - 5, text=text, font=("Segoe UI Emoji", font_size), fill=text_color)
+        self.canvas.create_text(cx, cy, text=text, font=("Segoe UI Emoji", fs), fill=color if status != "idle" else "#cdd6f4")
 
         # Connection indicator
         if self._mock:
-            self.canvas.create_text(size - 20 - margin, margin + 5, text="DEMO", font=("Segoe UI", int(7 * scale), "bold"), fill="#ffd93d")
+            self.canvas.create_text(cx + r - 10, cy - r + 10, text="DEMO", font=("Segoe UI", int(7 * scale), "bold"), fill="#ffd93d")
         elif self.mqtt_manager and self.mqtt_manager.connected_count > 0:
-            self.canvas.create_oval(size - 20 - margin - 5, margin, size - 20 - margin + 5, margin + 10, fill="#6bcb77", outline="")
+            self.canvas.create_oval(cx + r - 15, cy - r + 5, cx + r - 5, cy - r + 15, fill="#6bcb77", outline="")
         else:
-            self.canvas.create_oval(size - 20 - margin - 5, margin, size - 20 - margin + 5, margin + 10, fill="#f38ba8", outline="")
+            self.canvas.create_oval(cx + r - 15, cy - r + 5, cx + r - 5, cy - r + 15, fill="#f38ba8", outline="")
 
         self._actualizar_info_label(states, scale)
 
@@ -218,30 +204,29 @@ class BambuPetWidget(ctk.CTk):
         
         priority = {"printing": 0, "paused": 1, "finished": 2, "preparing": 3, "idle": 4, "error": 5}
         best_state = None
-        best_priority = 999
+        best_p = 999
         
-        for serial, state in states.items():
-            st = state.get("status", "idle")
-            p = priority.get(st, 99)
-            if p < best_priority:
-                best_priority = p
+        for state in states.values():
+            p = priority.get(state.get("status", "idle"), 99)
+            if p < best_p:
+                best_p = p
                 best_state = state
         
         if best_state:
-            name = best_state.get("name", "")
+            name = best_state.get("name", "")[:12]
             status = best_state.get("status", "idle")
             progress = best_state.get("progress", 0)
             
             if status == "printing":
-                info = f"{name[:12]}: {progress}%"
+                info = f"{name}: {progress}%"
             elif status == "paused":
-                info = f"{name[:12]}: Pausado"
+                info = f"{name}: Pausado"
             elif status in ("done", "finished"):
-                info = f"{name[:12]}: Listo ✓"
+                info = f"{name}: Listo"
             elif status == "error":
-                info = f"{name[:12]}: Error"
+                info = f"{name}: Error"
             else:
-                info = f"{name[:12]}: En espera"
+                info = f"{name}: En espera"
             
             self.info_label.configure(text=info)
 
@@ -268,13 +253,16 @@ class BambuPetWidget(ctk.CTk):
             self.state_trackers[serial] = PrinterStateTracker(name=name)
         self.after(0, self._dibujar_pet)
 
-    # Drag & Drop
     def _on_drag_start(self, event):
+        if event.widget == self.btn_settings:
+            return
         self._drag_data["x"] = event.x_root
         self._drag_data["y"] = event.y_root
         self._drag_data["dragging"] = False
 
     def _on_drag_motion(self, event):
+        if event.widget == self.btn_settings:
+            return
         dx = abs(event.x_root - self._drag_data["x"])
         dy = abs(event.y_root - self._drag_data["y"])
         if dx > 3 or dy > 3:
@@ -289,47 +277,21 @@ class BambuPetWidget(ctk.CTk):
     def _on_drag_end(self, event):
         self._drag_data["dragging"] = False
 
-    # Menu contextual
-    def _mostrar_menu_contextual(self, event=None):
-        menu = ctk.CTkToplevel(self)
-        menu.overrideredirect(True)
-        menu.attributes("-topmost", True)
-        menu.attributes("-alpha", 0.95)
-
-        frame = ctk.CTkFrame(menu, fg_color="#1e1e2e", corner_radius=10, border_width=1, border_color="#45475a")
-        frame.pack(padx=2, pady=2)
-
-        opciones = [
-            ("⚙️  Configuración", self._abrir_settings),
-            ("🔄  Reconectar", self._reconectar),
-            ("📋  Info impresora", self._mostrar_info_impresora),
-            ("─────────────", None),
-            ("❌  Salir", self._salir),
-        ]
-
-        for texto, comando in opciones:
-            if comando is None:
-                sep = ctk.CTkFrame(frame, height=1, fg_color="#45475a")
-                sep.pack(fill="x", padx=10, pady=3)
-            else:
-                btn = ctk.CTkButton(
-                    frame, text=texto, command=lambda c=comando, m=menu: (m.destroy(), c()),
-                    fg_color="transparent", hover_color="#313244",
-                    text_color="#cdd6f4", anchor="w", height=32, width=200,
-                    font=ctk.CTkFont(size=12)
-                )
-                btn.pack(fill="x", padx=5, pady=1)
-
+    def _mostrar_menu(self, event=None):
+        menu = tk.Menu(self, tearoff=0, bg="#1e1e2e", fg="#cdd6f4",
+                       activebackground="#313244", activeforeground="#cdd6f4")
+        menu.add_command(label="⚙️ Configuración", command=self._abrir_settings)
+        menu.add_command(label="🔄 Reconectar", command=self._reconectar)
+        menu.add_command(label="📋 Info impresora", command=self._mostrar_info)
+        menu.add_separator()
+        menu.add_command(label="❌ Salir", command=self._salir)
+        
         if event:
-            x = event.x_root
-            y = event.y_root
+            menu.tk_popup(event.x_root, event.y_root)
         else:
             x = self.btn_settings.winfo_rootx()
             y = self.btn_settings.winfo_rooty() + 30
-
-        menu.geometry(f"+{x}+{y}")
-        menu.bind("<FocusOut>", lambda e: menu.destroy())
-        menu.after(100, lambda: menu.focus_set())
+            menu.tk_popup(x, y)
 
     def _abrir_settings(self):
         SettingsWindow(self, self.config_data, on_save=self._aplicar_config)
@@ -344,28 +306,29 @@ class BambuPetWidget(ctk.CTk):
             self.mqtt_manager.stop_all()
         self._iniciar_mqtt()
 
-    def _mostrar_info_impresora(self):
-        info_win = ctk.CTkToplevel(self)
-        info_win.title("Info Impresora")
-        info_win.geometry("300x250")
-        info_win.resizable(False, False)
-        info_win.transient(self)
-        info_win.attributes("-topmost", True)
-
-        main = ctk.CTkFrame(info_win, fg_color="#1e1e2e")
+    def _mostrar_info(self):
+        import customtkinter as ctk
+        ctk.set_appearance_mode("dark")
+        win = ctk.CTkToplevel(self)
+        win.title("Info Impresora")
+        win.geometry("300x250")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        
+        main = ctk.CTkFrame(win, fg_color="#1e1e2e")
         main.pack(fill="both", expand=True, padx=15, pady=15)
-
-        ctk.CTkLabel(main, text="🖨️  Estado de Impresora", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00e5ff").pack(pady=(5, 10))
-
+        
+        ctk.CTkLabel(main, text="🖨️ Estado de Impresora", font=ctk.CTkFont(16, "bold"), text_color="#00e5ff").pack(pady=(5, 10))
+        
         states = self._get_enriched_states()
         if not states:
             ctk.CTkLabel(main, text="Sin datos de impresora", font=ctk.CTkFont(size=12), text_color="#a0a0a0").pack(expand=True)
         else:
-            for serial, state in states.items():
-                info_text = f"Nombre: {state.get('name', '?')}\nEstado: {state.get('status', '?')}\nProgreso: {state.get('progress', 0)}%"
-                ctk.CTkLabel(main, text=info_text, font=ctk.CTkFont(size=11), text_color="#cdd6f4", justify="left").pack(anchor="w", padx=10, pady=5)
-
-        ctk.CTkButton(main, text="Cerrar", command=info_win.destroy, fg_color="#00e5ff", hover_color="#00b8d4", text_color="#000000", height=32).pack(side="bottom", fill="x", pady=(10, 0))
+            for state in states.values():
+                info = f"Nombre: {state.get('name', '?')}\nEstado: {state.get('status', '?')}\nProgreso: {state.get('progress', 0)}%"
+                ctk.CTkLabel(main, text=info, font=ctk.CTkFont(size=11), text_color="#cdd6f4", justify="left").pack(anchor="w", padx=10, pady=5)
+        
+        ctk.CTkButton(main, text="Cerrar", command=win.destroy, fg_color="#00e5ff", text_color="#000000", height=32).pack(side="bottom", fill="x", pady=(10, 0))
 
     def _salir(self):
         if self._mock:
@@ -385,7 +348,7 @@ class BambuPetWidget(ctk.CTk):
             self._activar_mock()
             return
         
-        def _connect_mqtt():
+        def _connect():
             self.mqtt_manager = MQTTManager(on_state_change=self.actualizar_estado)
             for p in printers:
                 self.mqtt_manager.add_printer(p)
@@ -398,75 +361,102 @@ class BambuPetWidget(ctk.CTk):
             else:
                 logger.info(f"✅ {self.mqtt_manager.connected_count} conectada(s)")
         
-        threading.Thread(target=_connect_mqtt, daemon=True).start()
+        threading.Thread(target=_connect, daemon=True).start()
 
 
-class SettingsWindow(ctk.CTkToplevel):
+class SettingsWindow(tk.Toplevel):
+    """Ventana de configuración con Tkinter nativo."""
+
     def __init__(self, parent, config: dict, on_save=None):
         super().__init__(parent)
         self.config_data = config
         self.on_save = on_save
         self.parent = parent
 
-        self.title("bambuPet - Configuración")
-        self.geometry("360x420")
+        self.title("bambuPet - Config")
+        self.geometry("350x400")
         self.resizable(False, False)
-        self.transient(parent)
+        self.configure(bg="#1e1e2e")
+        self.attributes("-topmost", True)
 
+        # Centrar
         self.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - 180
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - 210
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 175
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 200
         self.geometry(f"+{x}+{y}")
 
-        main = ctk.CTkFrame(self, fg_color="#1e1e2e")
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-
-        ctk.CTkLabel(main, text="🐼  bambuPet", font=ctk.CTkFont(size=20, weight="bold"), text_color="#00e5ff").pack(pady=(10, 5))
-        ctk.CTkLabel(main, text="Configuración del widget", font=ctk.CTkFont(size=11), text_color="#a0a0a0").pack(pady=(0, 15))
+        # Título
+        tk.Label(self, text="🐼 bambuPet", font=("Segoe UI", 20, "bold"), bg="#1e1e2e", fg="#00e5ff").pack(pady=(15, 5))
+        tk.Label(self, text="Configuración del widget", font=("Segoe UI", 11), bg="#1e1e2e", fg="#a0a0a0").pack(pady=(0, 15))
 
         # Scale
-        scale_frame = ctk.CTkFrame(main, fg_color="transparent")
-        scale_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(scale_frame, text="📐 Tamaño", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
-        self.scale_label = ctk.CTkLabel(scale_frame, text=f"{int(config['display']['scale'] * 100)}%", font=ctk.CTkFont(size=11), text_color="#00e5ff")
+        scale_frame = tk.Frame(self, bg="#1e1e2e")
+        scale_frame.pack(fill="x", padx=20, pady=5)
+        tk.Label(scale_frame, text="📐 Tamaño", font=("Segoe UI", 12, "bold"), bg="#1e1e2e", fg="#cdd6f4").pack(side="left")
+        self.scale_label = tk.Label(scale_frame, text=f"{int(config['display']['scale'] * 100)}%", font=("Segoe UI", 11), bg="#1e1e2e", fg="#00e5ff")
         self.scale_label.pack(side="right")
-        self.scale_var = ctk.DoubleVar(value=config["display"]["scale"])
-        ctk.CTkSlider(main, from_=0.5, to=2.0, variable=self.scale_var, command=self._on_scale_change, button_color="#00e5ff", progress_color="#00e5ff").pack(fill="x", padx=10)
+        
+        self.scale_var = tk.DoubleVar(value=config["display"]["scale"])
+        scale_slider = tk.Scale(
+            self, from_=0.5, to=2.0, variable=self.scale_var,
+            orient="horizontal", bg="#1e1e2e", fg="#cdd6f4",
+            troughcolor="#313244", highlightthickness=0,
+            sliderrelief="flat", length=200,
+            command=self._on_scale_change
+        )
+        scale_slider.pack(fill="x", padx=20)
 
         # Opacity
-        opacity_frame = ctk.CTkFrame(main, fg_color="transparent")
-        opacity_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(opacity_frame, text="👁️ Opacidad", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
-        self.opacity_label = ctk.CTkLabel(opacity_frame, text=f"{int(config['display']['opacity'] * 100)}%", font=ctk.CTkFont(size=11), text_color="#00e5ff")
+        opacity_frame = tk.Frame(self, bg="#1e1e2e")
+        opacity_frame.pack(fill="x", padx=20, pady=5)
+        tk.Label(opacity_frame, text="👁 Opacidad", font=("Segoe UI", 12, "bold"), bg="#1e1e2e", fg="#cdd6f4").pack(side="left")
+        self.opacity_label = tk.Label(opacity_frame, text=f"{int(config['display']['opacity'] * 100)}%", font=("Segoe UI", 11), bg="#1e1e2e", fg="#00e5ff")
         self.opacity_label.pack(side="right")
-        self.opacity_var = ctk.DoubleVar(value=config["display"]["opacity"])
-        ctk.CTkSlider(main, from_=0.2, to=1.0, variable=self.opacity_var, command=self._on_opacity_change, button_color="#00e5ff", progress_color="#00e5ff").pack(fill="x", padx=10)
+        
+        self.opacity_var = tk.DoubleVar(value=config["display"]["opacity"])
+        opacity_slider = tk.Scale(
+            self, from_=0.2, to=1.0, variable=self.opacity_var,
+            orient="horizontal", bg="#1e1e2e", fg="#cdd6f4",
+            troughcolor="#313244", highlightthickness=0,
+            sliderrelief="flat", length=200,
+            command=self._on_opacity_change
+        )
+        opacity_slider.pack(fill="x", padx=20)
 
         # Always on top
-        self.top_var = ctk.BooleanVar(value=config["display"]["always_on_top"])
-        ctk.CTkCheckBox(main, text="Siempre encima", variable=self.top_var, checkbox_height=20, fg_color="#00e5ff", hover_color="#00b8d4").pack(anchor="w", padx=10, pady=(10, 5))
+        self.top_var = tk.BooleanVar(value=config["display"]["always_on_top"])
+        tk.Checkbutton(self, text="Siempre encima", variable=self.top_var,
+                      bg="#1e1e2e", fg="#cdd6f4", selectcolor="#313244",
+                      activebackground="#1e1e2e", activeforeground="#cdd6f4",
+                      font=("Segoe UI", 11)).pack(anchor="w", padx=20, pady=(10, 5))
 
-        # Printers info
-        ctk.CTkLabel(main, text="🖨️ Impresoras:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        # Printers
+        tk.Label(self, text="🖨 Impresoras:", font=("Segoe UI", 12, "bold"), bg="#1e1e2e", fg="#cdd6f4").pack(anchor="w", padx=20, pady=(10, 5))
         for p in config.get("mqtt", {}).get("printers", []):
-            ctk.CTkLabel(main, text=f"  • {p.get('name', '?')} @ {p.get('ip', '?')}", font=ctk.CTkFont(size=10), text_color="#a0a0a0").pack(anchor="w", padx=20)
+            tk.Label(self, text=f"  • {p.get('name', '?')} @ {p.get('ip', '?')}", font=("Segoe UI", 10), bg="#1e1e2e", fg="#a0a0a0").pack(anchor="w", padx=30)
 
         # Buttons
-        btn_frame = ctk.CTkFrame(main, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=(15, 5))
-        ctk.CTkButton(btn_frame, text="💾 Guardar", command=self._guardar, fg_color="#00e5ff", hover_color="#00b8d4", text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"), height=34, corner_radius=8).pack(side="left", expand=True, fill="x", padx=(0, 5))
-        ctk.CTkButton(btn_frame, text="Cancelar", command=self.destroy, fg_color="#f38ba8", hover_color="#e06c75", text_color="#000000", font=ctk.CTkFont(size=12), height=34, corner_radius=8).pack(side="right", expand=True, fill="x", padx=(5, 0))
+        btn_frame = tk.Frame(self, bg="#1e1e2e")
+        btn_frame.pack(fill="x", padx=20, pady=(15, 5))
+        tk.Button(btn_frame, text="💾 Guardar", command=self._guardar, bg="#00e5ff", fg="#000000",
+                 font=("Segoe UI", 12, "bold"), bd=0, padx=20, pady=8,
+                 activebackground="#00b8d4", cursor="hand2").pack(side="left", expand=True, fill="x", padx=(0, 5))
+        tk.Button(btn_frame, text="Cancelar", command=self.destroy, bg="#f38ba8", fg="#000000",
+                 font=("Segoe UI", 12), bd=0, padx=20, pady=8,
+                 activebackground="#e06c75", cursor="hand2").pack(side="right", expand=True, fill="x", padx=(5, 0))
 
     def _on_scale_change(self, value):
-        self.scale_label.configure(text=f"{int(value * 100)}%")
-        self.config_data["display"]["scale"] = value
-        self.parent.config_data["display"]["scale"] = value
+        val = float(value)
+        self.scale_label.configure(text=f"{int(val * 100)}%")
+        self.config_data["display"]["scale"] = val
+        self.parent.config_data["display"]["scale"] = val
         self.parent._configurar_ventana()
         self.parent._crear_interfaz()
 
     def _on_opacity_change(self, value):
-        self.opacity_label.configure(text=f"{int(value * 100)}%")
-        self.parent.attributes("-alpha", value)
+        val = float(value)
+        self.opacity_label.configure(text=f"{int(val * 100)}%")
+        self.parent.attributes("-alpha", val)
 
     def _guardar(self):
         self.config_data["display"]["scale"] = self.scale_var.get()
